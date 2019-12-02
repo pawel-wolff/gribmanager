@@ -82,7 +82,10 @@ class VerticalParameterInModelLevel(VerticalParameter):
 
     def _get_pressure_of_model_level(self, surface_pressure_at_location, index):
         level = self._level[index]
-        return self._a[level] + self._b[level] * surface_pressure_at_location
+        # self._a[level] + self._b[level] * surface_pressure_at_location
+        # is the pressure at a half-level (the interface between level layers)
+        # and we need the pressure at the full-level
+        return 0.5 * (self._a[level] + self._a[level - 1]) + 0.5 * (self._b[level] + self._b[level - 1]) * surface_pressure_at_location
 
     def _pressure_of_all_levels(self, lat, lon):
         surface_pressure = self._surface_pressure.get_value_at(lat, lon)
