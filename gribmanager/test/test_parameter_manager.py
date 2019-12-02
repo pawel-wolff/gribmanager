@@ -18,7 +18,7 @@ def test(p_m, param_id, n):
 
 gm._logger_config(logging.WARNING)
 
-INPUTs = ['/home/wolp/data/MCMWF-ENFILES/EN19090900', '/home/wolp/data/MCMWF-ENFILES/EN19090903']
+INPUTs = ['/home/wolp/data/ECMWF/EN19090900', '/home/wolp/data/ECMWF/EN19090903']
 p_m = pm.ParameterManager(INPUTs[0])
 
 

@@ -7,7 +7,7 @@ import xarray as xr
 #enfiles = glob.glob('/o3p/ECMWF/ENFILES/EN1906*')
 #iagos_file = '/o3p/iagos/iagosv2/netcdf/L2/201906/IAGOS_timeseries_2019061914230591.nc'
 
-enfiles = glob.glob('/home/wolp/data/MCMWF-ENFILES/EN1906*')
+enfiles = glob.glob('/home/wolp/data/ECMWF/EN1906*')
 iagos_file = '/home/wolp/data/IAGOS/IAGOS_timeseries_2019061914230591.nc'
 
 iagos_df = xr.open_dataset(iagos_file).to_dataframe()

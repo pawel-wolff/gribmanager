@@ -7,8 +7,8 @@ import os
 import psutil
 
 
-INPUT = '/home/wolp/data/MCMWF-ENFILES/EN19090900'
-INPUT_1994 = '/home/wolp/data/MCMWF-ENFILES/EN94070100'
+INPUT = '/home/wolp/data/ECMWF/EN19090900'
+INPUT_1994 = '/home/wolp/data/ECMWF/EN94070100'
 
 
 def profile_four_nearest_points(param_id, n, ecc=False):
