@@ -155,6 +155,30 @@ class GribMessage(utils.AbstractDictionary, GribAbstractItem):
             output += f', {key_name}={self.get(key_name)}'
         return output
 
+    def __repr__(self):
+        gfdump = [repr(type(self))]
+        gfdump.append(f'GRIB message; fast grided data access: '
+                      f'{"yes" if self._get_lat_lon_index_of_four_nearest_points is not None else "no"}')
+        gfdump.append(f'\tOriginating generating centre: {self.get(gk.CENTRE)}')
+        gfdump.append(f'\tReference data: {self.get(gk.REFERENCE_DATE)}, time: {self.get(gk.REFERENCE_TIME)}')
+        gfdump.append(f'\tParameter id: {self.get(gk.PARAMETER_ID)}')
+        gfdump.append(f'\tShort name: {self.get(gk.SHORT_NAME)}')
+        gfdump.append(f'\tName: {self.get(gk.NAME)}')
+        gfdump.append(f'\tUnits: {self.get(gk.UNITS)}')
+        gfdump.append(f'\tType of level: {self.get(gk.TYPE_OF_LEVEL)}')
+        gfdump.append(f'\tLevel: {self.get(gk.LEVEL)}')
+        grid_type = self.get(gk.GRID_TYPE)
+        gfdump.append(f'\tGrid type: {grid_type}')
+        if grid_type == gk.GRID_TYPE_REGULAR_LL:
+            gfdump.append(f'\t\tGridded area (lat, lon): '
+                          f'({self.get(gk.LATITUDE_OF_FIRST_GRID_POINT)}, {self.get(gk.LONGITUDE_OF_FIRST_GRID_POINT)}), '
+                          f'({self.get(gk.LATITUDE_OF_LAST_GRID_POINT)}, {self.get(gk.LONGITUDE_OF_LAST_GRID_POINT)})')
+            gfdump.append(f'\tGrid resolution: '
+                          f'd_lat={self.get(gk.DELTA_LATITUDE)}, d_lon={self.get(gk.DELTA_LONGITUDE)}')
+        elif grid_type == gk.GRID_TYPE_SH:
+            gfdump.append(f'\t\tM={self.get(gk.GRID_SH_M)}, K={self.get(gk.GRID_SH_K)}, J={self.get(gk.GRID_SH_J)}')
+        return '\n'.join(gfdump)
+
     def __iter__(self):
         return _GribMessageKeyIterator(self)
 
@@ -231,6 +255,11 @@ class GribFile(GribAbstractItem):
     def __str__(self):
         return self._filename
 
+    def __repr__(self):
+        gfdump = [repr(type(self))]
+        gfdump.append(f'GRIB file {self._filename}')
+        return '\n'.join(gfdump)
+
 
 class GribFileIndexedBy(utils.AbstractDictionary, GribAbstractItem):
     def __init__(self, filename, *keys):
@@ -269,6 +298,12 @@ class GribFileIndexedBy(utils.AbstractDictionary, GribAbstractItem):
 
     def __str__(self):
         return f'{self._filename}, keys: {self._keys}'
+
+    def __repr__(self):
+        gfdump = [repr(type(self))]
+        gfdump.append(f'GRIB file {self._filename}')
+        gfdump.append(f'\tIndices: {self._keys}')
+        return '\n'.join(gfdump)
 
     def get_indices(self, key):
         if key in self._keys:
