@@ -1,4 +1,4 @@
-import gribmanager as gm
+import gribmanager_obsolete as gm
 import itertools
 
 

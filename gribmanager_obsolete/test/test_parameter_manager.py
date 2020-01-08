@@ -1,4 +1,4 @@
-from gribmanager import grib_manager as gm, parameter_manager as pm
+from gribmanager_obsolete import grib_manager as gm, parameter_manager as pm
 import logging
 import random
 import cProfile

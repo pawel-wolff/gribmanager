@@ -1,7 +1,7 @@
 import pandas as pd
 from collections import deque, namedtuple
 
-from gribmanager import utils, parameter_manager as pm, parameter_interpolation as pi
+from gribmanager_obsolete import utils, parameter_manager as pm, parameter_interpolation as pi
 
 ParameterSpecification = namedtuple('ParameterSpecification', ['id', 'name', 'param_id', 'filter', 'must_be_unique'],
                                     defaults=(None, False))

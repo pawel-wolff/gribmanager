@@ -1,4 +1,4 @@
-from gribmanager.grib_keys import (
+from gribmanager_obsolete.grib_keys import (
     TYPE_OF_LEVEL,
     PV,
     PARAMETER_ID,
@@ -10,20 +10,20 @@ from gribmanager.grib_keys import (
     SURFACE_LEVEL,
 )
 
-from gribmanager.grib_manager import (
+from gribmanager_obsolete.grib_manager import (
     open_grib,
 )
 
-from gribmanager.parameter_manager import (
+from gribmanager_obsolete.parameter_manager import (
     ParameterManager,
 )
 
-from gribmanager.interpolation_in_time_manager import (
+from gribmanager_obsolete.interpolation_in_time_manager import (
     ParameterSpecification,
     InterpolationInTimeManager,
 )
 
-#from gribmanager.utils import (
+#from gribmanager_obsolete.utils import (
 #    get_timestamp_for_ENfilename,
 #)
 

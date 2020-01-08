@@ -2,7 +2,7 @@
 
 import eccodes as ecc
 import logging
-from gribmanager import utils, grib_keys as gk, parameter_interpolation as pi
+from gribmanager_obsolete import utils, grib_keys as gk, parameter_interpolation as pi
 import functools
 import math
 

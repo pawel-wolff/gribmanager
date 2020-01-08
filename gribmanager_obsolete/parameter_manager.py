@@ -1,6 +1,6 @@
 # TODO: this package should be independent of grib_*; try to extract a common interface for any kind of spatial data
 
-from gribmanager import utils, grib_keys as gk, grib_manager as gm, parameter_interpolation as pi
+from gribmanager_obsolete import utils, grib_keys as gk, grib_manager as gm, parameter_interpolation as pi
 import functools
 import inspect
 import pandas as pd
