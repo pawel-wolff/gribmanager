@@ -18,7 +18,3 @@ from gribmanager.parameter_manager import (
     ParameterManager,
 )
 
-from gribmanager.interpolation_in_time_manager import (
-    ParameterSpecification,
-    InterpolationInTimeManager,
-)

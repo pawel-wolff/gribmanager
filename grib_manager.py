@@ -1,13 +1,11 @@
 # TODO: look into pygrid library: https://github.com/jswhit/pygrib/blob/master/pygrib.pyx; https://jswhit.github.io/pygrib/docs/pygrib-module.html
 
-import eccodes as ecc
-
-from common import longitude, interpolation
-from gribmanager import grib_keys as gk
-from common import utils, abstract_dictionary
-from common.log import logger
 import functools
 import math
+import eccodes as ecc
+from common.log import logger
+from common import utils, abstract_dictionary, longitude, interpolation
+from gribmanager import grib_keys as gk
 
 
 _grib_items = 0
