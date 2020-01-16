@@ -45,10 +45,11 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
         global _grib_messages
         _grib_messages += 1
         self._id = message_id
+        logger.debug(f'initialized GribMessage id={self.get_id()}')
+        # keep a reference to a grib file in order not to dispose the file before disposing the grib message
         self._grib_file = grib_file
         self._values = None
         self._get_lat_lon_index_of_four_nearest_points = self._check_grid()
-        logger.info(f'GribMessage init id={self.get_id()}')
 
     def _check_grid(self):
         if gk.VALUES in self and self.get(gk.PACKING_TYPE) == gk.PACKING_TYPE_GRID_SIMPLE \
@@ -75,8 +76,8 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
 
     def __del__(self):
         if self._id is not None:
-            logger.info(f'releasing GribMessage id={self.get_id()}')
             ecc.codes_release(self.get_id())
+            logger.debug(f'released GribMessage id={self.get_id()}')
             self._id = None
             global _grib_messages_released
             _grib_messages_released += 1
@@ -172,25 +173,34 @@ class GribMessageWithCache(abstract_dictionary.AbstractCacheDictionary, GribMess
     pass
 
 
-class _GribMessageKeyIterator:
+class _GribMessageKeyIterator(GribAbstractItem):
     def __init__(self, grib_message, key_namespace=_GRIB_KEY_NAMESPACE_USED_KEY_ITERATION):
+        super().__init()
         self._grib_message = grib_message
-        self._keys_iterator_id = \
-            ecc.codes_keys_iterator_new(self._grib_message.get_id(), key_namespace)
-        ecc.codes_skip_duplicates(self._keys_iterator_id)
-        #ecc.codes_skip_computed(self._keys_iterator_id)
-        #ecc.codes_skip_edition_specific(self._keys_iterator_id)
-        #ecc.codes_skip_function(self._keys_iterator_id)
+        self._id = ecc.codes_keys_iterator_new(self._grib_message.get_id(), key_namespace)
+        logger.debug(f'_GribMessageKeyIterator init id={self.get_id()}')
+        ecc.codes_skip_duplicates(self.get_id())
+        #ecc.codes_skip_computed(self.get_id())
+        #ecc.codes_skip_edition_specific(self.get_id())
+        #ecc.codes_skip_function(self.get_id())
+
+    def get_id(self):
+        if self._id is None:
+            raise ValueError('_GribMessageKeyIterator already released')
+        return self._id
 
     def __del__(self):
-        ecc.codes_keys_iterator_delete(self._keys_iterator_id)
+        if self._id is not None:
+            ecc.codes_keys_iterator_delete(self.get_id())
+            logger.debug(f'released _GribMessageKeyIterator id={self.get_id()}')
+            self._id = None
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        if ecc.codes_keys_iterator_next(self._keys_iterator_id):
-            return ecc.codes_keys_iterator_get_name(self._keys_iterator_id)
+        if ecc.codes_keys_iterator_next(self.get_id()):
+            return ecc.codes_keys_iterator_get_name(self.get_id())
         else:
             raise StopIteration
 
@@ -210,6 +220,7 @@ class GribFile(GribAbstractItem):
         super().__init__()
         self._filename = filename
         self._file = open(filename, 'rb')
+        logger.info(f'opened GribFile {str(self)}')
         global _grib_files
         _grib_files += 1
 
@@ -220,8 +231,8 @@ class GribFile(GribAbstractItem):
 
     def __del__(self):
         if self._file is not None and not self._file.closed:
-            logger.info(f'releasing GribFile {str(self)}')
             self.get_file().close()
+            logger.info(f'closed GribFile {str(self)}')
             global _grib_files_closed
             _grib_files_closed += 1
 
@@ -253,6 +264,7 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
         self._keys = keys
         self._filename = filename
         self._id = ecc.codes_index_new_from_file(self._filename, self._keys)
+        logger.info(f'initialized GribFileIndexedBy id={self.get_id()}, filename={self._filename}')
         global _grib_indices
         _grib_indices += 1
 
@@ -263,8 +275,8 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
 
     def __del__(self):
         if self._id is not None:
-            logger.info(f'releasing GribFileIndexedBy id={self.get_id()}, filename={self._filename}')
             ecc.codes_index_release(self.get_id())
+            logger.info(f'released GribFileIndexedBy id={self.get_id()}, filename={self._filename}')
             self._id = None
             global _grib_indices_released
             _grib_indices_released += 1
