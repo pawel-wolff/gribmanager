@@ -54,6 +54,7 @@ class VerticalParameter(Parameter):
             return interpolation.linear_interpolation(pressure, zip(p_list, v_list))
 
     def get_value_at2(self, lat, lon, pressure):
+        # TODO: deprecated (remove)
         root_node = interpolation.InterpolationNode(label=None)
         for i, p in zip(*self._index_and_pressure_of_sandwiching_levels(pressure, lat, lon)):
             value_at_level = self._parameter_at_all_levels[i].get_value_at(lat, lon)

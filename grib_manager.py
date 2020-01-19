@@ -123,6 +123,7 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
                                                    (longitude.Longitude(b.lon), v_bd)))
 
     def get_value_at_1(self, lat, lon):
+        # TODO: deprecated (remove)
         (a, b), (c, d) = self.get_four_nearest_points(lat, lon)
         # a - b
         # |   |
@@ -136,6 +137,7 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
         return interpolation.midpoint(v_ac, v_bd, q)
 
     def get_value_at_2(self, lat, lon):
+        # TODO: deprecated (remove)
         root_node = interpolation.InterpolationNode(label=None)
         points = self.get_four_nearest_points(lat, lon)
         for same_latitude_points in points:
