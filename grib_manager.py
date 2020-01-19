@@ -111,6 +111,31 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
             return (points[0], points[1]), (points[2], points[3])
 
     def get_value_at(self, lat, lon):
+        (a, b), (c, d) = self.get_four_nearest_points(lat, lon)
+        # a - b
+        # |   |
+        # c - d
+        p = abs(lat - a.lat) / abs(c.lat - a.lat)
+        v_ac = interpolation.midpoint(self.get_value_by_index(a.index), self.get_value_by_index(c.index), p)
+        v_bd = interpolation.midpoint(self.get_value_by_index(b.index), self.get_value_by_index(d.index), p)
+        return interpolation.linear_interpolation(longitude.Longitude(lon),
+                                                  ((longitude.Longitude(a.lon), v_ac),
+                                                   (longitude.Longitude(b.lon), v_bd)))
+
+    def get_value_at_1(self, lat, lon):
+        (a, b), (c, d) = self.get_four_nearest_points(lat, lon)
+        # a - b
+        # |   |
+        # c - d
+        p = abs(lat - a.lat) / abs(c.lat - a.lat)
+        v_ac = interpolation.midpoint(self.get_value_by_index(a.index), self.get_value_by_index(c.index), p)
+        v_bd = interpolation.midpoint(self.get_value_by_index(b.index), self.get_value_by_index(d.index), p)
+        dist_lon_a = abs(longitude.Longitude(lon) - longitude.Longitude(a.lon))
+        dist_b_lon = abs(longitude.Longitude(b.lon) - longitude.Longitude(lon))
+        q = dist_lon_a / (dist_lon_a + dist_b_lon)
+        return interpolation.midpoint(v_ac, v_bd, q)
+
+    def get_value_at_2(self, lat, lon):
         root_node = interpolation.InterpolationNode(label=None)
         points = self.get_four_nearest_points(lat, lon)
         for same_latitude_points in points:
@@ -175,7 +200,7 @@ class GribMessageWithCache(abstract_dictionary.AbstractCacheDictionary, GribMess
 
 class _GribMessageKeyIterator(GribAbstractItem):
     def __init__(self, grib_message, key_namespace=_GRIB_KEY_NAMESPACE_USED_KEY_ITERATION):
-        super().__init()
+        super().__init__()
         self._grib_message = grib_message
         self._id = ecc.codes_keys_iterator_new(self._grib_message.get_id(), key_namespace)
         logger.debug(f'_GribMessageKeyIterator init id={self.get_id()}')

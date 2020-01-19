@@ -46,8 +46,16 @@ class VerticalParameter(Parameter):
         raise NotImplementedError
 
     def get_value_at(self, lat, lon, pressure):
+        i_list, p_list = self._index_and_pressure_of_sandwiching_levels(pressure, lat, lon)
+        v_list = (self._parameter_at_all_levels[i].get_value_at(lat, lon) for i in i_list)
+        if len(i_list) == 1:
+            return next(v_list)
+        else:
+            return interpolation.linear_interpolation(pressure, zip(p_list, v_list))
+
+    def get_value_at2(self, lat, lon, pressure):
         root_node = interpolation.InterpolationNode(label=None)
-        for i, p in self._index_and_pressure_of_sandwiching_levels(pressure, lat, lon):
+        for i, p in zip(*self._index_and_pressure_of_sandwiching_levels(pressure, lat, lon)):
             value_at_level = self._parameter_at_all_levels[i].get_value_at(lat, lon)
             interpolation.InterpolationNode(label=p, value=value_at_level, parent=root_node)
         return root_node.interpolate((pressure, ))
@@ -73,7 +81,7 @@ class VerticalParameter(Parameter):
             lat_node = interpolation.InterpolationNode(label=same_latitude_points[0].lat, parent=root_node)
             for point in same_latitude_points:
                 lon_node = interpolation.InterpolationNode(label=longitude.Longitude(point.lon), parent=lat_node)
-                for i, p in self._index_and_pressure_of_sandwiching_levels(pressure, point.lat, point.lon):
+                for i, p in zip(*self._index_and_pressure_of_sandwiching_levels(pressure, point.lat, point.lon)):
                 # FIXME: it was like this: for i, p in self.index_and_pressure_of_sandwiching_levels(pressure, lat, lon):
                     #value_at_level2 = self._parameter_at_all_levels[i].get_value_at(point.lat, point.lon)
                     value_at_level = self._parameter_at_all_levels[i].get_value_by_index(point.index)
