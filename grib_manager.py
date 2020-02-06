@@ -3,6 +3,8 @@
 import functools
 import math
 import eccodes as ecc
+import numpy as np
+import xarray as xr
 from common.log import logger
 from common import utils, abstract_dictionary, longitude, interpolation
 from gribmanager import grib_keys as gk
@@ -68,6 +70,59 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
             return functools.partial(utils.four_nearest_points_in_rectangular_grid, lat0, lon0, lat1, lon1, d_lat, d_lon, n_lat, n_lon, lat_major)
         else:
             return None
+
+    def to_numpy_array(self):
+        if not(gk.VALUES in self and self.get(gk.PACKING_TYPE) == gk.PACKING_TYPE_GRID_SIMPLE and self.get(gk.GRID_TYPE) == gk.GRID_TYPE_REGULAR_LL):
+            return None
+        data = np.array(self[gk.VALUES]) # this seems more safe, but maybe data = self[gk.VALUE] is enough? consider memory dealloc issues
+        lat0, lon0 = self[gk.LATITUDE_OF_FIRST_GRID_POINT], self[gk.LONGITUDE_OF_FIRST_GRID_POINT]
+        lat1, lon1 = self[gk.LATITUDE_OF_LAST_GRID_POINT], self[gk.LONGITUDE_OF_LAST_GRID_POINT]
+        d_lat = abs(self[gk.DELTA_LATITUDE]) * (1 if self[gk.DELTA_LATITUDE_POSITIVE] else -1)
+        d_lon = abs(self[gk.DELTA_LONGITUDE]) * (-1 if self[gk.DELTA_LONGITUDE_NEGATIVE] else 1)
+        lat_major = False if self[gk.LATITUDE_MINOR_LONGITUDE_MAJOR] else True
+        n_lat, n_lon = self[gk.NO_LATITUDES], self[gk.NO_LONGITUDES]
+        if n_lat <= 1 or n_lon <= 1:
+            raise ValueError
+        if not math.isclose(lat0 + (n_lat - 1) * d_lat - lat1, 0.):
+            raise ValueError
+        if not math.isclose((lon0 + (n_lon - 1) * d_lon - lon1) % 360., 0.):
+            raise ValueError
+
+        # shape the data array according to n_lat, n_lon and lat_major
+        m, n = (n_lat, n_lon) if lat_major else (n_lon, n_lat)
+        data = data.reshape((m, n))
+
+        # make the data array lat_major-like (lat is axis=0, lon is axis=1), by transposing if necessary
+        if not lat_major:
+            data = data.T
+            lat_major = True
+
+        # and flip according to d_lat, d_lon
+        if d_lat < 0:
+            lat0, lat1 = lat1, lat0
+            d_lat = -d_lat
+            data = np.flip(data, axis=0)
+        if d_lon < 0:
+            lon0, lon1 = lon1, lon0
+            d_lon = -d_lon
+            data = np.flip(data, axis=1)
+
+        # check if the longitude coordinates are circular
+        lon_circular = math.isclose((n_lon * d_lon) % 360., 0)
+        # if circular, pad circularly the data array with one element along the longitude axis;
+        # it will be useful for interpolation
+        if lon_circular:
+            n_lon += 1
+            lon1 += d_lon
+            pad_width = ((0, 0), (0, 1))
+            data = np.pad(data, pad_width, mode='wrap')
+
+        # create increasing lat / lon coordinates, so that can use xarray.DataArray.interp(lat=lats, lon=lons, assume_sorted=True)
+        # TODO: test now for performance !!!
+        lat_coords = np.linspace(lat0, lat1, num=n_lat)
+        lon0 = (lon0 + 180.) % 360. - 180. # so that the longitude coordinates look more familiar
+        lon_coords = np.linspace(lon0, lon0 + (n_lon - 1) * d_lon, num=n_lon)
+        return data, lat_coords, lon_coords
 
     def get_id(self):
         if self._id is None:

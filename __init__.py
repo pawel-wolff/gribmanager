@@ -14,7 +14,9 @@ from gribmanager.grib_manager import (
     open_grib,
 )
 
-from gribmanager.parameter_manager import (
+from gribmanager.parameter_manager_vectorized import (
+    HorizontalParameter,
+    VerticalParameterInModelLevel,
+    VerticalParameterInPressureLevel,
     ParameterManager,
 )
-

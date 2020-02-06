@@ -1,0 +1,332 @@
+# TODO: this package should be independent of grib_*; try to extract a common interface for any kind of spatial data
+
+import functools
+import inspect
+import numpy as np
+import pandas as pd
+import xarray as xr
+import scipy.interpolate
+from typing import Iterable, List
+from common.log import logger
+from common import longitude, utils, interpolation
+from gribmanager import grib_keys as gk, grib_manager as gm
+
+
+MODEL_LEVEL_DIM = 'ml'
+PRESSURE_LEVEL_DIM = 'pl'
+LAT_DIM = 'lat'
+LON_DIM = 'lon'
+
+
+def clip_latitudes(arr):
+    """
+    Limits values to the array to the interval [-90., 90.]
+    and logs a warning if there is any value outside this interval.
+
+    :param arr: NumPy array (or scalar)
+    :return: a clipped NumPy array (or scalar)
+    """
+
+    count = np.count_nonzero(arr < -90.) + np.count_nonzero(arr > 90.)
+    if count > 0:
+        logger.warning(f'{count} latitude(s) outside the interval [-90, 90] found: {arr[(arr < -90.) | (arr > 90.)]}; these values were clipped to [-90, 90]')
+        return np.clip(arr, -90., 90.)
+    else:
+        return arr
+
+
+def clip_and_log(a_min, a_max, arr):
+    count = np.count_nonzero(arr < a_min) + np.count_nonzero(arr > a_max)
+    if count > 0:
+        arr_np = np.asarray(arr)
+        below_min = arr_np[arr_np < a_min]
+        above_max = arr_np[arr_np > a_max]
+        if below_min.size > 0:
+            logger.warning(f'{below_min.size} pressure value(s) below min={a_min}: {pd.Series(below_min.flat).describe()}]')
+        if above_max.size > 0:
+            logger.warning(f'{above_max.size} pressure value(s) above max={a_max}: {pd.Series(above_max.flat).describe()}]')
+        if a_min == -np.inf:
+            a_min = None
+        if a_max == np.inf:
+            a_max = None
+        return np.clip(arr, a_min, a_max)
+    else:
+        return arr
+
+
+class Parameter:
+    def __init__(self, grib_msg: gm.GribMessage):
+        self.short_name = grib_msg.get(gk.SHORT_NAME)
+        self.name = grib_msg.get(gk.NAME)
+        self.param_id = grib_msg.get(gk.PARAMETER_ID)
+        self.data = None
+
+    def __repr__(self):
+        return f'{type(self)}: {self.short_name} - {self.name} (parameter id={self.param_id})\ndata: {self.data}'
+
+
+class HorizontalParameter(Parameter):
+    def __init__(self, grib_msg: gm.GribMessage):
+        super().__init__(grib_msg)
+        arr, self.lat_coords, self.lon_coords = grib_msg.to_numpy_array()
+        self.data = xr.DataArray(arr, coords={LAT_DIM: self.lat_coords, LON_DIM: self.lon_coords}, dims=(LAT_DIM, LON_DIM))
+        smallest_lon_coord = self.lon_coords[0]
+        self._normalize_lon = lambda lon: (lon - smallest_lon_coord) % 360. + smallest_lon_coord
+
+    def interp(self, lat=None, lon=None, pressure=None):
+        coords = {}
+        if lat is not None:
+            coords[LAT_DIM] = clip_latitudes(lat)
+        if lon is not None:
+            coords[LON_DIM] = self._normalize_lon(lon)
+        return self.data.interp(coords=coords, method='linear', assume_sorted=True)
+
+    def interp_numpy(self, lat, lon, pressure=None):
+        """
+        Interpolation along a timeseries-like data: lat, lon, pressure are considered to be dependent on the same
+        variable(s), not necessarily 1-dimensional.
+        In particular must be of equal length (shape).
+
+        :param lat: float, numpy.ndarray, xarray, an iterable
+        :param lon: float, numpy.ndarray, xarray, an iterable
+        :param pressure: optional, None; ignored; for homogeneity of the method signature between other subclasses of Parameter class
+        :return: numpy.ndarray
+        """
+
+        lat = np.asarray(lat)
+        lon = np.asarray(lon)
+        if lat.shape != lon.shape:
+            raise ValueError(f'lat and lon must have the same shape; lat.shape={lat.shape}, lon.shape={lon.shape}')
+
+        points = (self.lat_coords, self.lon_coords)
+        xi = np.stack([clip_latitudes(lat), self._normalize_lon(lon)], axis=-1)
+        res = scipy.interpolate.interpn(points, self.data.values, xi, method='linear')
+        return res if lat.shape != () else res.squeeze()
+
+
+class VerticalParameter(Parameter):
+    def __init__(self, grib_msgs_at_all_levels: List[gm.GribMessage], level_coords, level_dim):
+        super().__init__(grib_msgs_at_all_levels[0])
+        data_lat_lon_list = [msg.to_numpy_array() for msg in grib_msgs_at_all_levels]
+        data_list, lat_coords_list, lon_coords_list = zip(*data_lat_lon_list)
+        lat_coords_stacked = np.stack(lat_coords_list)
+        self.lat_coords = lat_coords_list[0]
+        if not (lat_coords_stacked == self.lat_coords).all():
+            raise ValueError(f'latitude coordinates are not coherent across levels; self={self}')
+        lon_coords_stacked = np.stack(lon_coords_list)
+        self.lon_coords = lon_coords_list[0]
+        if not (lon_coords_stacked == self.lon_coords).all():
+            raise ValueError(f'longitude coordinates are not coherent across levels; self={self}')
+        smallest_lon_coord = self.lon_coords[0]
+        self._normalize_lon = lambda lon: (lon - smallest_lon_coord) % 360. + smallest_lon_coord
+        data_stacked = np.stack(data_list)
+        self.data = xr.DataArray(data_stacked,
+                                 coords={level_dim: level_coords, LAT_DIM: self.lat_coords, LON_DIM: self.lon_coords},
+                                 dims=(level_dim, LAT_DIM, LON_DIM)).sortby(level_dim)
+
+
+class VerticalParameterInModelLevel(VerticalParameter):
+    # TODO: manage failure cases
+    def __init__(self, grib_msgs_at_all_levels: Iterable[gm.GribMessage], surface_pressure: HorizontalParameter):
+        # TODO: test if this works properly; permute grib_msgs_at_all_levels, a see if the ndarray self.values.values has changed accordingly
+        """
+
+        :param grib_msgs_at_all_levels: an iterable with GRIB messages corresponding to a given parameter at its all vertical levels
+        :param surface_pressure:
+        """
+        self._surface_pressure = surface_pressure
+        grib_msgs_at_all_levels = list(grib_msgs_at_all_levels)
+        self.no_levels = len(grib_msgs_at_all_levels)
+        if self.no_levels == 0:
+            raise ValueError(f'grib_msgs_at_all_levels={grib_msgs_at_all_levels}')
+        self.ml_coords, self.a_in_Pa, self.b_coeff = self._get_model_level_coords_and_coeffs(grib_msgs_at_all_levels)
+        super().__init__(grib_msgs_at_all_levels, level_coords=self.ml_coords, level_dim=MODEL_LEVEL_DIM)
+
+    def _get_model_level_coords_and_coeffs(self, grib_msgs_at_all_levels):
+        type_of_level, paramater_level_index, ab_list \
+            = zip(*((msg[gk.TYPE_OF_LEVEL],
+                     msg[gk.LEVEL],
+                     np.asarray(msg[gk.PV]))
+                    for msg in grib_msgs_at_all_levels))
+        if not all(tl == gk.HYBRID_LEVEL_TYPE for tl in type_of_level):
+            d = {l: tl for l, tl in zip(paramater_level_index, type_of_level) if tl != gk.HYBRID_LEVEL_TYPE}
+            raise ValueError(f'Some levels are not {gk.HYBRID_LEVEL_TYPE}: {d}')
+
+        parameter_level_coords = np.asarray(paramater_level_index) # + 0.5 if product is given at half-levels (or -0.5 ???)
+        paramater_level_index_with_guard = paramater_level_index + (max(paramater_level_index) + 1, )
+        parameter_level_coords_with_guard = np.asarray(paramater_level_index_with_guard)
+        ab_stacked = np.stack(ab_list)
+        ab = ab_list[0]
+        if not (ab_stacked == ab).all():
+            raise ValueError(f'model level definition coefficients (PV: a, b) are not coherent across levels; self={self}')
+        a_len = len(ab) // 2
+        model_half_level_coords = np.arange(a_len) + 0.5
+        a_in_Pa = xr.DataArray(np.array(ab[:a_len]),
+                               coords={MODEL_LEVEL_DIM: model_half_level_coords}, dims=MODEL_LEVEL_DIM)
+        b_coeff = xr.DataArray(np.array(ab[a_len:]),
+                               coords={MODEL_LEVEL_DIM: model_half_level_coords}, dims=MODEL_LEVEL_DIM)
+        return parameter_level_coords, \
+               a_in_Pa.interp(coords={MODEL_LEVEL_DIM: parameter_level_coords_with_guard},
+                              method='linear', assume_sorted=True, kwargs={'bounds_error': False, 'fill_value': np.inf}), \
+               b_coeff.interp(coords={MODEL_LEVEL_DIM: parameter_level_coords_with_guard},
+                              method='linear', assume_sorted=True, kwargs={'bounds_error': False, 'fill_value': 0.})
+
+    def interp(self, lat=None, lon=None, pressure=None):
+        if pressure is None:
+            ml = None
+        else:
+            sp = self._surface_pressure.interp(lat=lat, lon=lon)
+            p = sp * self.b_coeff + self.a_in_Pa
+            # p(t, ml) is increasing in ml; find interpolated ml(t) such that p(t, ml(t)) = p_0(t) for all t
+            level_index = (p >= pressure).argmax(dim=MODEL_LEVEL_DIM)
+            lower_level_index = np.maximum(level_index - 1, 0)
+            upper_level_index = np.minimum(level_index, self.no_levels - 1)
+            pressure_lower = p.isel({MODEL_LEVEL_DIM: lower_level_index}).drop(labels=MODEL_LEVEL_DIM)
+            pressure_upper = p.isel({MODEL_LEVEL_DIM: upper_level_index}).drop(labels=MODEL_LEVEL_DIM)
+            weight = xr.where(np.isclose(pressure_upper, pressure_lower),
+                              0.5, (pressure - pressure_lower) / (pressure_upper - pressure_lower))
+            ml = (1 - weight) * self.ml_coords[lower_level_index] + weight * self.ml_coords[upper_level_index]
+
+        coords = {}
+        if ml is not None:
+            coords[MODEL_LEVEL_DIM] = ml
+        if lat is not None:
+            coords[LAT_DIM] = clip_latitudes(lat)
+        if lon is not None:
+            coords[LON_DIM] = self._normalize_lon(lon)
+        return self.data.interp(coords=coords, method='linear', assume_sorted=True)
+
+    def interp_numpy(self, lat, lon, pressure):
+        """
+        Interpolation along a timeseries-like data: lat, lon, pressure are considered to be dependent on the same
+        variable(s), not necessarily 1-dimensional.
+        In particular must be of equal length (shape).
+
+        :param lat: float, numpy.ndarray, xarray, an iterable
+        :param lon: float, numpy.ndarray, xarray, an iterable
+        :param pressure: float, numpy.ndarray, xarray, an iterable
+        :return: numpy.ndarray
+        """
+
+        pressure = np.asarray(pressure)
+        lat = np.asarray(lat)
+        lon = np.asarray(lon)
+        if not (pressure.shape == lat.shape == lon.shape):
+            raise ValueError(f'lat, lon and pressure must have the same shape; lat.shape={lat.shape}, lon.shape={lon.shape}, pressure.shape={pressure.shape}')
+
+        sp = self._surface_pressure.interp_numpy(lat=lat, lon=lon)
+        p = np.multiply.outer(sp, self.b_coeff.values) + self.a_in_Pa.values
+        # p(t, x) is increasing in x; find interpolated x(t) st p(t, x(t)) = p_0(t) for all t
+        level_index = np.argmax(p >= pressure[..., np.newaxis], axis=-1)
+        lower_level_index = np.maximum(level_index - 1, 0)
+        upper_level_index = np.minimum(level_index, self.no_levels - 1)
+        pressure_indices = tuple(np.indices(pressure.shape)) # if pressure is d-dim ndarray, then pressure_indices is a list od d d-dim ndarrays with indicies along corresponding dimension
+        pressure_lower = p[pressure_indices + (lower_level_index, )]
+        pressure_upper = p[pressure_indices + (upper_level_index, )] # TODO: maybe with np.take one can make it better?
+        weight = np.where(np.isclose(pressure_upper, pressure_lower),
+                          0.5, (pressure - pressure_lower) / (pressure_upper - pressure_lower))
+        ml = (1 - weight) * self.ml_coords[lower_level_index] + weight * self.ml_coords[upper_level_index]
+
+        points = (self.ml_coords, self.lat_coords, self.lon_coords)
+        xi = np.stack([ml, clip_latitudes(lat), self._normalize_lon(lon)], axis=-1)
+        return scipy.interpolate.interpn(points, self.data.values, xi, method='linear')
+
+
+# TODO: manage case when at some levels are in hPa and others in Pa; must fix super().__init__ in that respect (sorting wrt level)
+class VerticalParameterInPressureLevel(VerticalParameter):
+    def __init__(self, grib_msgs_at_all_levels: Iterable[gm.GribMessage]):
+        # TODO: test if this works properly; permute grib_msgs_at_all_levels, a see if the ndarray self.values.values has changed accordingly
+        """
+
+        :param grib_msgs_at_all_levels: an iterable with GRIB messages corresponding to a given parameter at its all vertical levels
+        """
+        grib_msgs_at_all_levels = list(grib_msgs_at_all_levels)
+        self.no_levels = len(grib_msgs_at_all_levels)
+        if self.no_levels == 0:
+            raise ValueError(f'grib_msgs_at_all_levels={grib_msgs_at_all_levels}')
+        level, type_of_level = zip(*((msg[gk.LEVEL], msg[gk.TYPE_OF_LEVEL]) for msg in grib_msgs_at_all_levels))
+        isobaric_level_types = (gk.ISOBARIC_IN_PA_LEVEL_TYPE, gk.ISOBARIC_IN_HPA_LEVEL_TYPE)
+        if not all(tl in isobaric_level_types for tl in type_of_level):
+            d = {l: tl for l, tl in zip(level, type_of_level) if tl not in isobaric_level_types}
+            raise ValueError(f'Some levels are not {isobaric_level_types}: {d}')
+        self.pl_coords = np.asarray([100. * float(l) if tl == gk.ISOBARIC_IN_HPA_LEVEL_TYPE else float(l) for l, tl in zip(level, type_of_level)])
+        self.clip_pressures = functools.partial(clip_and_log, self.pl_coords.min(), self.pl_coords.max())
+        super().__init__(grib_msgs_at_all_levels, level_coords=self.pl_coords, level_dim=PRESSURE_LEVEL_DIM)
+
+    def interp(self, lat=None, lon=None, pressure=None):
+        coords = {}
+        if pressure is not None:
+            coords[PRESSURE_LEVEL_DIM] = self.clip_pressures(pressure)
+        if lat is not None:
+            coords[LAT_DIM] = clip_latitudes(lat)
+        if lon is not None:
+            coords[LON_DIM] = self._normalize_lon(lon)
+        return self.data.interp(coords=coords, method='linear', assume_sorted=True)
+
+    def interp_numpy(self, lat, lon, pressure):
+        """
+        Interpolation along a timeseries-like data: lat, lon, pressure (in [Pa]) are considered to be dependent on
+        the same variable(s), not necessarily 1-dimensional. In particular must be of equal length (shape).
+
+        :param lat: float, numpy.ndarray, xarray, an iterable
+        :param lon: float, numpy.ndarray, xarray, an iterable
+        :param pressure: float, numpy.ndarray, xarray, an iterable
+        :return: numpy.ndarray
+        """
+
+        pressure = np.asarray(pressure)
+        lat = np.asarray(lat)
+        lon = np.asarray(lon)
+        if not (pressure.shape == lat.shape == lon.shape):
+            raise ValueError(f'lat, lon and pressure must have the same shape; lat.shape={lat.shape}, lon.shape={lon.shape}, pressure.shape={pressure.shape}')
+
+        points = (self.pl_coords, self.lat_coords, self.lon_coords)
+        xi = np.stack([self.clip_pressures(pressure), clip_latitudes(lat), self._normalize_lon(lon)], axis=-1)
+        return scipy.interpolate.interpn(points, self.data.values, xi, method='linear')
+
+
+class ParameterManager:
+    _INDEXING_KEYS = [gk.PARAMETER_ID]
+
+    def __init__(self, grib_filename):
+        self._grib_filename = grib_filename
+        self._grib_file_indexed = gm.GribFileIndexedByWithCache(self._grib_filename, *ParameterManager._INDEXING_KEYS)
+
+    def get_parameter(self, param_id, predicate=None, must_be_unique=False):
+        def arguments_to_string():
+            if predicate is not None:
+                try:
+                    predicate_source = inspect.getsource(predicate)
+                except OSError:
+                    predicate_source = '<source code not available>'
+            else:
+                predicate_source = 'None'
+            return f'GRIB file={str(self._grib_file_indexed)}, param_id={param_id}, predicate={predicate_source}, ' \
+                   f'must_be_unique={must_be_unique}'
+
+        grib_msgs = self._grib_file_indexed[param_id]
+        if predicate is not None:
+            grib_msgs = list(filter(predicate, grib_msgs))
+        if len(grib_msgs) > 1:
+            if must_be_unique:
+                raise ValueError(f'{arguments_to_string()}: a parameter is not unique')
+
+            # vertical (3d) parameter
+            if all(msg.is_level_hybrid() for msg in grib_msgs):
+                surface_pressure = self.get_parameter(gk.SURFACE_PRESSURE_PARAM_ID, must_be_unique=True)
+                return VerticalParameterInModelLevel(grib_msgs, surface_pressure)
+            elif all(msg.is_level_isobaric() for msg in grib_msgs):
+                return VerticalParameterInPressureLevel(grib_msgs)
+            else:
+                raise ValueError(f'{arguments_to_string()}: not a vertical parameter (neither it is in model level, '
+                                 f'nor in pressure level) or an unknown vertical parameter')
+        elif len(grib_msgs) == 1:
+            # horizontal (2d) parameter
+            return HorizontalParameter(grib_msgs[0])
+        else:
+            raise ValueError(f'{arguments_to_string()}: no such parameters found')
+
+    def __repr__(self):
+        dump = [repr(type(self))]
+        dump.append(f'GRIB file {self._grib_filename}')
+        return '\n'.join(dump)
