@@ -30,14 +30,17 @@ class GribAbstractItem:
         global _grib_items
         _grib_items += 1
 
+    def close(self):
+        pass
+
     def __enter__(self):
         return self
 
     # FIXME: how to do it properly? see e.g.
     # https://stackoverflow.com/questions/32975036/why-is-del-called-at-the-end-of-a-with-block
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # self.__del__()
-        pass
+        self.close()
+        return False
 
 
 # basic implementation of access to a GRIB message
@@ -129,13 +132,17 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
             raise ValueError('GRIB message already released')
         return self._id
 
-    def __del__(self):
+    def close(self):
         if self._id is not None:
-            ecc.codes_release(self.get_id())
-            logger.debug(f'released GribMessage id={self.get_id()}')
+            _id = self.get_id()
+            ecc.codes_release(_id)
             self._id = None
+            logger.debug(f'released GribMessage id={_id}')
             global _grib_messages_released
             _grib_messages_released += 1
+
+    def __del__(self):
+        self.close()
 
     def __contains__(self, key):
         if ecc.codes_is_defined(self.get_id(), key):
@@ -271,11 +278,15 @@ class _GribMessageKeyIterator(GribAbstractItem):
             raise ValueError('_GribMessageKeyIterator already released')
         return self._id
 
-    def __del__(self):
+    def close(self):
         if self._id is not None:
-            ecc.codes_keys_iterator_delete(self.get_id())
-            logger.debug(f'released _GribMessageKeyIterator id={self.get_id()}')
+            _id = self.get_id()
+            ecc.codes_keys_iterator_delete(_id)
             self._id = None
+            logger.debug(f'released _GribMessageKeyIterator id={_id}')
+
+    def __del__(self):
+        self.close()
 
     def __iter__(self):
         return self
@@ -284,6 +295,7 @@ class _GribMessageKeyIterator(GribAbstractItem):
         if ecc.codes_keys_iterator_next(self.get_id()):
             return ecc.codes_keys_iterator_get_name(self.get_id())
         else:
+            self.close()
             raise StopIteration
 
 
@@ -300,7 +312,7 @@ class GribFile(GribAbstractItem):
     def __init__(self, filename):
         self._file = None
         super().__init__()
-        self._filename = filename
+        self._filename = str(filename)
         self._file = open(filename, 'rb')
         logger.info(f'opened GribFile {str(self)}')
         global _grib_files
@@ -311,12 +323,15 @@ class GribFile(GribAbstractItem):
             raise ValueError(f'GRIB file {str(self)} already closed')
         return self._file
 
-    def __del__(self):
+    def close(self):
         if self._file is not None and not self._file.closed:
             self.get_file().close()
             logger.info(f'closed GribFile {str(self)}')
             global _grib_files_closed
             _grib_files_closed += 1
+
+    def __del__(self):
+        self.close()
 
     def __iter__(self):
         return self
@@ -344,7 +359,7 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
         if len(keys) == 0:
             raise Exception('index must contain at least one key')
         self._keys = keys
-        self._filename = filename
+        self._filename = str(filename)
         self._id = ecc.codes_index_new_from_file(self._filename, self._keys)
         logger.info(f'initialized GribFileIndexedBy id={self.get_id()}, filename={self._filename}')
         global _grib_indices
@@ -355,13 +370,17 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
             raise ValueError('GRIB index already released')
         return self._id
 
-    def __del__(self):
+    def close(self):
         if self._id is not None:
-            ecc.codes_index_release(self.get_id())
-            logger.info(f'released GribFileIndexedBy id={self.get_id()}, filename={self._filename}')
+            _id = self.get_id()
+            ecc.codes_index_release(_id)
             self._id = None
+            logger.info(f'released GribFileIndexedBy id={_id}, filename={self._filename}')
             global _grib_indices_released
             _grib_indices_released += 1
+
+    def __del__(self):
+        self.close()
 
     def __getitem__(self, index):
         index = utils.to_tuple(index)
