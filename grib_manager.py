@@ -45,7 +45,7 @@ class GribAbstractItem:
 
 # basic implementation of access to a GRIB message
 class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
-    def __init__(self, message_id, grib_file):
+    def __init__(self, message_id, grib_file, headers_only=False):
         super().__init__()
         global _grib_messages
         _grib_messages += 1
@@ -54,7 +54,7 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
         # keep a reference to a grib file in order not to dispose the file before disposing the grib message
         self._grib_file = grib_file
         self._values = None
-        self._get_lat_lon_index_of_four_nearest_points = self._check_grid()
+        self._get_lat_lon_index_of_four_nearest_points = self._check_grid() if not headers_only else None
 
     def _check_grid(self):
         if gk.VALUES in self and self.get(gk.PACKING_TYPE) == gk.PACKING_TYPE_GRID_SIMPLE \
@@ -299,9 +299,9 @@ class _GribMessageKeyIterator(GribAbstractItem):
             raise StopIteration
 
 
-def open_grib(filename, index_keys=None, unique_indexing=False):
+def open_grib(filename, index_keys=None, unique_indexing=False, headers_only=False):
     if index_keys is None:
-        return GribFile(filename)
+        return GribFile(filename, headers_only=headers_only)
     elif not unique_indexing:
         return GribFileIndexedByWithCache(filename, *index_keys)
     else:
@@ -309,9 +309,10 @@ def open_grib(filename, index_keys=None, unique_indexing=False):
 
 
 class GribFile(GribAbstractItem):
-    def __init__(self, filename):
+    def __init__(self, filename, headers_only=False):
         self._file = None
         super().__init__()
+        self._headers_only = headers_only
         self._filename = str(filename)
         self._file = open(filename, 'rb')
         logger.info(f'opened GribFile {str(self)}')
@@ -338,9 +339,9 @@ class GribFile(GribAbstractItem):
 
     def __next__(self):
         # load a next message from self.file
-        message_id = ecc.codes_grib_new_from_file(self.get_file())
+        message_id = ecc.codes_grib_new_from_file(self.get_file(), headers_only=self._headers_only)
         if message_id is not None:
-            return GribMessageWithCache(message_id, self)
+            return GribMessageWithCache(message_id, self, headers_only=self._headers_only)
         else:
             raise StopIteration
 
