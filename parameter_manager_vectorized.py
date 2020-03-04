@@ -54,6 +54,14 @@ def clip_and_log(a_min, a_max, arr):
         return arr
 
 
+def _prepare_interpolation_coordinates(coords, da):
+    explicit_interpolation_dimensions = \
+        set().union(*(coord.dims for coord in coords.values() if isinstance(coord, xr.DataArray)))
+    for implicit_interpolation_dimension in set(da.dims).difference(coords.keys()):
+        if implicit_interpolation_dimension in explicit_interpolation_dimensions:
+            coords[implicit_interpolation_dimension] = da[implicit_interpolation_dimension]
+
+
 class Parameter:
     def __init__(self, grib_msg: gm.GribMessage):
         self.short_name = grib_msg.get(gk.SHORT_NAME)
@@ -178,13 +186,16 @@ class VerticalParameterInModelLevel(VerticalParameter):
             sp = self._surface_pressure.interp(lat=lat, lon=lon)
             p = sp * self.b_coeff + self.a_in_Pa
             # p(t, ml) is increasing in ml; find interpolated ml(t) such that p(t, ml(t)) = p_0(t) for all t
+            if not isinstance(pressure, xr.DataArray):
+                pressure = xr.DataArray(pressure)
             level_index = (p >= pressure).argmax(dim=MODEL_LEVEL_DIM)
             lower_level_index = np.maximum(level_index - 1, 0)
             upper_level_index = np.minimum(level_index, self.no_levels - 1)
             pressure_lower = p.isel({MODEL_LEVEL_DIM: lower_level_index}).drop(labels=MODEL_LEVEL_DIM)
             pressure_upper = p.isel({MODEL_LEVEL_DIM: upper_level_index}).drop(labels=MODEL_LEVEL_DIM)
-            weight = xr.where(np.isclose(pressure_upper, pressure_lower),
-                              0.5, (pressure - pressure_lower) / (pressure_upper - pressure_lower))
+            weight = xr.where(abs(pressure_upper - pressure_lower) < 1e-05,
+                              0.5,
+                              (pressure - pressure_lower) / (pressure_upper - pressure_lower))
             ml = (1 - weight) * self.ml_coords[lower_level_index] + weight * self.ml_coords[upper_level_index]
 
         coords = {}
@@ -194,6 +205,7 @@ class VerticalParameterInModelLevel(VerticalParameter):
             coords[LAT_DIM] = clip_latitudes(lat)
         if lon is not None:
             coords[LON_DIM] = self._normalize_lon(lon)
+        _prepare_interpolation_coordinates(coords, self.data)
         return self.data.interp(coords=coords, method='linear', assume_sorted=True)
 
     def interp_numpy(self, lat, lon, pressure):
