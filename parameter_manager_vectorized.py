@@ -54,20 +54,28 @@ def clip_and_log(a_min, a_max, arr):
         return arr
 
 
-def _prepare_interpolation_coordinates(coords, da):
-    explicit_interpolation_dimensions = \
-        set().union(*(coord.dims for coord in coords.values() if isinstance(coord, xr.DataArray)))
-    for implicit_interpolation_dimension in set(da.dims).difference(coords.keys()):
-        if implicit_interpolation_dimension in explicit_interpolation_dimensions:
-            coords[implicit_interpolation_dimension] = da[implicit_interpolation_dimension]
-
-
 class Parameter:
     def __init__(self, grib_msg: gm.GribMessage):
         self.short_name = grib_msg.get(gk.SHORT_NAME)
         self.name = grib_msg.get(gk.NAME)
         self.param_id = grib_msg.get(gk.PARAMETER_ID)
         self.data = None
+
+    def _interp(self, coords):
+        da = self.data
+        # explicit dimensions of interpolation is the set of all dimensions on which the interpolation variables,
+        # explicitely given in the coords dictionary, depend. E.g. if pressure pressure depends on the dimensions
+        # ('lat', 'lon'), then ('lat', 'lon') are in the set
+        explicit_interpolation_dimensions = \
+            set().union(*(coord.dims for coord in coords.values() if isinstance(coord, xr.DataArray)))
+        # run thru all dimensions of da which are not present as coords keys (these we want implicitely to keep
+        # untouched by interpolation, i.e. keep the original coordinates of da for these dimensions);
+        # because of peculiarity of xr.DataArray.interp method, we must add these dimensions to the coords dictionary
+        # along with the original cooridinates
+        for implicit_interpolation_dimension in set(da.dims).difference(coords.keys()):
+            if implicit_interpolation_dimension in explicit_interpolation_dimensions:
+                coords[implicit_interpolation_dimension] = self.data[implicit_interpolation_dimension]
+        return self.data.interp(coords=coords, method='linear', assume_sorted=True)
 
     def __repr__(self):
         return f'{type(self)}: {self.short_name} - {self.name} (parameter id={self.param_id})\ndata: {self.data}'
@@ -87,7 +95,7 @@ class HorizontalParameter(Parameter):
             coords[LAT_DIM] = clip_latitudes(lat)
         if lon is not None:
             coords[LON_DIM] = self._normalize_lon(lon)
-        return self.data.interp(coords=coords, method='linear', assume_sorted=True)
+        return self._interp(coords)
 
     def interp_numpy(self, lat, lon, pressure=None):
         """
@@ -205,8 +213,7 @@ class VerticalParameterInModelLevel(VerticalParameter):
             coords[LAT_DIM] = clip_latitudes(lat)
         if lon is not None:
             coords[LON_DIM] = self._normalize_lon(lon)
-        _prepare_interpolation_coordinates(coords, self.data)
-        return self.data.interp(coords=coords, method='linear', assume_sorted=True)
+        return self._interp(coords)
 
     def interp_numpy(self, lat, lon, pressure):
         """
@@ -273,7 +280,7 @@ class VerticalParameterInPressureLevel(VerticalParameter):
             coords[LAT_DIM] = clip_latitudes(lat)
         if lon is not None:
             coords[LON_DIM] = self._normalize_lon(lon)
-        return self.data.interp(coords=coords, method='linear', assume_sorted=True)
+        return self._interp(coords)
 
     def interp_numpy(self, lat, lon, pressure):
         """
