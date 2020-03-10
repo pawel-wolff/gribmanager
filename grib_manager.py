@@ -10,6 +10,7 @@ from common import utils, abstract_dictionary, longitude, interpolation
 from gribmanager import grib_keys as gk
 
 
+# for debug purposes only; can be removed in the future
 _grib_items = 0
 _grib_messages = 0
 _grib_messages_released = 0
@@ -315,7 +316,7 @@ class GribFile(GribAbstractItem):
         self._headers_only = headers_only
         self._filename = str(filename)
         self._file = open(filename, 'rb')
-        logger.info(f'opened GribFile {str(self)}')
+        logger.debug(f'opened GribFile {str(self)}')
         global _grib_files
         _grib_files += 1
 
@@ -327,7 +328,7 @@ class GribFile(GribAbstractItem):
     def close(self):
         if self._file is not None and not self._file.closed:
             self.get_file().close()
-            logger.info(f'closed GribFile {str(self)}')
+            logger.debug(f'closed GribFile {str(self)}')
             global _grib_files_closed
             _grib_files_closed += 1
 
@@ -362,7 +363,7 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
         self._keys = keys
         self._filename = str(filename)
         self._id = ecc.codes_index_new_from_file(self._filename, self._keys)
-        logger.info(f'initialized GribFileIndexedBy id={self.get_id()}, filename={self._filename}')
+        logger.debug(f'initialized GribFileIndexedBy id={self.get_id()}, filename={self._filename}')
         global _grib_indices
         _grib_indices += 1
 
@@ -376,7 +377,7 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
             _id = self.get_id()
             ecc.codes_index_release(_id)
             self._id = None
-            logger.info(f'released GribFileIndexedBy id={_id}, filename={self._filename}')
+            logger.debug(f'released GribFileIndexedBy id={_id}, filename={self._filename}')
             global _grib_indices_released
             _grib_indices_released += 1
 
