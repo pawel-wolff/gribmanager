@@ -440,8 +440,8 @@ def load_grib_parameters(filename, params_spec):
     with gm.GribFileIndexedByWithCache(filename, gk.PARAMETER_ID) as grib:
         for param_spec in params_spec:
             name = param_spec['name']
-            param_id = params_spec['param_id']
-            must_be_unique = param_spec.get('must_be_unique', False)
+            param_id = param_spec['param_id']
+            must_be_unique = param_spec['must_be_unique']
             filter_on = [(key, value) for key, value in param_spec.items() if key not in _RESERVED_PARAM_SPEC_KEYS]
             try:
                 param = get_param_by_id(param_id, must_be_unique, filter_on=None)
