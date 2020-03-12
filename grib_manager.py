@@ -390,9 +390,16 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
             raise KeyError(f'expected number of indices is {len(self._keys)}')
         for key, index in zip(self._keys, index):
             ecc.codes_index_select(self.get_id(), key, index)
-        value = list(_GribMessagesFromIndexGenerator(self))
+        value = []
+        try:
+            for msg in _GribMessagesFromIndexGenerator(self):
+                value.append(msg)
+        except Exception as e:
+            for msg in value:
+                msg.close()
+            raise e
         if len(value) == 0:
-            raise KeyError(f'no GRIB messages for {self._keys}={index}')
+            raise KeyError(f'no GRIB messages for {self._keys}={index} in {self}')
         return value
 
     def __str__(self):

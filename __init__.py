@@ -29,5 +29,5 @@ from gribmanager.parameter_manager_vectorized import (
     HorizontalParameter,
     VerticalParameterInModelLevel,
     VerticalParameterInPressureLevel,
-    ParameterManager,
+    load_grib_parameters,
 )

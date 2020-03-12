@@ -304,12 +304,29 @@ class VerticalParameterInPressureLevel(VerticalParameter):
         return scipy.interpolate.interpn(points, self.data.values, xi, method='linear')
 
 
+# TODO: remove as deprecated
 class ParameterManager:
+    """
+    deprecated
+    """
     _INDEXING_KEYS = [gk.PARAMETER_ID]
 
     def __init__(self, grib_filename):
         self._grib_filename = grib_filename
         self._grib_file_indexed = gm.GribFileIndexedByWithCache(self._grib_filename, *ParameterManager._INDEXING_KEYS)
+
+    def close(self):
+        self._grib_file_indexed.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+    def __del__(self):
+        self.close()
 
     def get_parameter(self, param_id, predicate=None, must_be_unique=False):
         def arguments_to_string():
@@ -349,3 +366,88 @@ class ParameterManager:
         dump = [repr(type(self))]
         dump.append(f'GRIB file {self._grib_filename}')
         return '\n'.join(dump)
+
+
+_RESERVED_PARAM_SPEC_KEYS = ['name', 'param_id', 'must_be_unique']
+
+def load_grib_parameters(filename, params_spec):
+    """
+    Load ECMWF parameters contained in a GRIB file
+
+    :param filename: a path to a GRIB file
+    :param params_spec: a list of dictionaries; each dictionary must specify an ECMWF parameter
+    to be loaded from the GRIB file. The dictionary must have the following keys and values:
+    key: 'name', value: str, must be unique within the params_spec list
+    key: 'param_id', value: int, ECMWF parameter id
+    key: 'must_be_unique', value: bool; indicates whether the parameter is expected to be represented by a single GRIB message
+    Furthermore, the following keys are optional:
+    key: any valid GRIB key, value: a single value or a list of values of the GRIB key to be used as a filter of GRIB messages
+    :return: a dict of Parameter objects, with keys being names given in params_spec
+    """
+    def get_param_by_id(param_id, must_be_unique, filter_on=None):
+        grib_msgs = grib[param_id]
+        try:
+            return get_param_from_grib_msgs(grib_msgs, must_be_unique, filter_on)
+        finally:
+            for msg in grib_msgs:
+                msg.close()
+
+    def get_param_from_grib_msgs(grib_msgs, must_be_unique, filter_on=None):
+        nonlocal surface_pressure
+        if filter_on:
+            filtered_grib_msgs = []
+            for msg in grib_msgs:
+                cond = True
+                for key, value in filter_on:
+                    try:
+                        v = msg[key]
+                    except KeyError:
+                        logger.warning(f'grib message {msg} in the GRIB file {filename} does not have the GRIB key={key} on which it was supposed to be filtered; value={value}')
+                        break
+                    if isinstance(value, (list, tuple)):
+                        cond = cond and v in value
+                    else:
+                        cond = cond and v == value
+                if cond:
+                    filtered_grib_msgs.append(msg)
+        else:
+            filtered_grib_msgs = grib_msgs
+        if not filtered_grib_msgs:
+            raise ValueError(f'no grib messages in the GRIB file {filename} with param_id={param_id} and filter_on={filter_on}')
+        if must_be_unique and len(filtered_grib_msgs) > 1:
+            logger.warning(f'more than one grib message found in the GRIB file {filename} with param_id={param_id} and filter_on={filter_on}, '
+                           f'while only one was expected; taking the last grib message')
+            filtered_grib_msgs = filtered_grib_msgs[-1:]
+
+        if len(filtered_grib_msgs) > 1:
+            # vertical (3d) parameter
+            if all(msg.is_level_hybrid() for msg in filtered_grib_msgs):
+                if not surface_pressure:
+                    surface_pressure = get_param_by_id(gk.SURFACE_PRESSURE_PARAM_ID, must_be_unique=True)
+                return VerticalParameterInModelLevel(filtered_grib_msgs, surface_pressure)
+            elif all(msg.is_level_isobaric() for msg in filtered_grib_msgs):
+                return VerticalParameterInPressureLevel(filtered_grib_msgs)
+            else:
+                raise ValueError(f'messages in GRIB file {filename} filtered according the criteria: param_id={param_id}, must_be_unique={must_be_unique}, filter_on={filter_on} '
+                                 f'does not form any known vertical parameter (neither it is in model level nor in pressure level); number of filtered messages={len(filtered_grib_msgs)}')
+        else:
+            # len(grib_msgs) == 1
+            # horizontal (2d) parameter
+            return HorizontalParameter(filtered_grib_msgs[0])
+
+    params = {}
+    surface_pressure = None
+    with gm.GribFileIndexedByWithCache(filename, gk.PARAMETER_ID) as grib:
+        for param_spec in params_spec:
+            name = param_spec['name']
+            param_id = params_spec['param_id']
+            must_be_unique = param_spec.get('must_be_unique', False)
+            filter_on = [(key, value) for key, value in param_spec.items() if key not in _RESERVED_PARAM_SPEC_KEYS]
+            try:
+                param = get_param_by_id(param_id, must_be_unique, filter_on=None)
+            except Exception as e:
+                logger.exception(f'LOAD_GRIB_PAREMETERS_ERROR: cannot load ECMWF parameter from the GRIB file={filename} with name={name}, '
+                                 f'param_id={param_id}, must_be_unique={must_be_unique}, filter_on={filter_on}', exc_info=e)
+                continue
+            params[name] = param
+    return params
