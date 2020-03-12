@@ -419,7 +419,12 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
 
 
 class GribFileIndexedByWithCache(abstract_dictionary.AbstractCacheDictionary, GribFileIndexedBy):
-    pass
+    def close(self):
+        for list_of_msgs in self.get_cache():
+            for msg in list_of_msgs:
+                msg.close()
+        super().close()
+
 
 
 class GribFileUniquelyIndexedBy(GribFileIndexedBy):
@@ -431,7 +436,10 @@ class GribFileUniquelyIndexedBy(GribFileIndexedBy):
 
 
 class GribFileUniquelyIndexedByWithCache(abstract_dictionary.AbstractCacheDictionary, GribFileUniquelyIndexedBy):
-    pass
+    def close(self):
+        for msg in self.get_cache():
+            msg.close()
+        super().close()
 
 
 class _GribMessagesFromIndexGenerator:
