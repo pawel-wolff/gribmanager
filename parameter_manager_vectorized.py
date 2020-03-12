@@ -54,6 +54,19 @@ def clip_and_log(a_min, a_max, arr):
         return arr
 
 
+def _force_unique_grib_message_per_level(grib_msgs):
+    msg_by_level = {}
+    duplicates = 0
+    for msg in grib_msgs:
+        level = msg[gk.LEVEL]
+        if level in msg_by_level:
+            duplicates += 1
+        msg_by_level[level] = msg
+    if duplicates > 0:
+        logger.warning(f'found {duplicates} of GRIB messages while forcing unique message per level; no_levels={len(msg_by_level)}; last processed GRIB message={msg}')
+    return list(msg_by_level.values())
+
+
 class Parameter:
     def __init__(self, grib_msg: gm.GribMessage):
         self.short_name = grib_msg.get(gk.SHORT_NAME)
@@ -150,8 +163,8 @@ class VerticalParameterInModelLevel(VerticalParameter):
         :param grib_msgs_at_all_levels: an iterable with GRIB messages corresponding to a given parameter at its all vertical levels
         :param surface_pressure:
         """
+        grib_msgs_at_all_levels = _force_unique_grib_message_per_level(grib_msgs_at_all_levels)
         self._surface_pressure = surface_pressure
-        grib_msgs_at_all_levels = list(grib_msgs_at_all_levels)
         self.no_levels = len(grib_msgs_at_all_levels)
         if self.no_levels == 0:
             raise ValueError(f'grib_msgs_at_all_levels={grib_msgs_at_all_levels}')
@@ -259,7 +272,7 @@ class VerticalParameterInPressureLevel(VerticalParameter):
 
         :param grib_msgs_at_all_levels: an iterable with GRIB messages corresponding to a given parameter at its all vertical levels
         """
-        grib_msgs_at_all_levels = list(grib_msgs_at_all_levels)
+        grib_msgs_at_all_levels = _force_unique_grib_message_per_level(grib_msgs_at_all_levels)
         self.no_levels = len(grib_msgs_at_all_levels)
         if self.no_levels == 0:
             raise ValueError(f'grib_msgs_at_all_levels={grib_msgs_at_all_levels}')
@@ -385,15 +398,9 @@ def load_grib_parameters(filename, params_spec):
     :return: a dict of Parameter objects, with keys being names given in params_spec
     """
     def get_param_by_id(param_id, must_be_unique, filter_on=None):
-        grib_msgs = grib[param_id]
-        try:
-            return get_param_from_grib_msgs(grib_msgs, must_be_unique, filter_on)
-        finally:
-            for msg in grib_msgs:
-                msg.close()
-
-    def get_param_from_grib_msgs(grib_msgs, must_be_unique, filter_on=None):
         nonlocal surface_pressure
+        grib_msgs = grib[param_id]
+        logger.debug(f'param_id={param_id}, len(grib_msgs)={len(grib_msgs)}, filter_on={filter_on}')
         if filter_on:
             filtered_grib_msgs = []
             for msg in grib_msgs:
@@ -416,7 +423,7 @@ def load_grib_parameters(filename, params_spec):
             raise ValueError(f'no grib messages in the GRIB file {filename} with param_id={param_id} and filter_on={filter_on}')
         if must_be_unique and len(filtered_grib_msgs) > 1:
             logger.warning(f'more than one grib message found in the GRIB file {filename} with param_id={param_id} and filter_on={filter_on}, '
-                           f'while only one was expected; taking the last grib message')
+                           f'while only one was expected; taking the last grib message; number of filtered messages={len(filtered_grib_msgs)}')
             filtered_grib_msgs = filtered_grib_msgs[-1:]
 
         if len(filtered_grib_msgs) > 1:
@@ -444,7 +451,7 @@ def load_grib_parameters(filename, params_spec):
             must_be_unique = param_spec['must_be_unique']
             filter_on = [(key, value) for key, value in param_spec.items() if key not in _RESERVED_PARAM_SPEC_KEYS]
             try:
-                param = get_param_by_id(param_id, must_be_unique, filter_on=None)
+                param = get_param_by_id(param_id, must_be_unique, filter_on)
             except Exception as e:
                 logger.exception(f'LOAD_GRIB_PAREMETERS_ERROR: cannot load ECMWF parameter from the GRIB file={filename} with name={name}, '
                                  f'param_id={param_id}, must_be_unique={must_be_unique}, filter_on={filter_on}', exc_info=e)
