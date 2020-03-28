@@ -387,11 +387,15 @@ class ParameterManager:
 _RESERVED_PARAM_SPEC_KEYS = ['name', 'param_id', 'must_be_unique']
 
 
-def load_grib_parameters(filenames, params_spec, surface_pressure=None):
+def load_grib_parameters(filenames, params_spec=None, surface_pressure=None):
+    if params_spec is None:
+        params_spec = {}
     if not isinstance(filenames, (list, tuple)):
         filenames = (filenames, )
     params_global_dict = {}
     for filename in filenames:
+        if not params_spec:
+            break
         params_current_dict = _load_grib_parameters_from_single_file(filename, params_spec, surface_pressure=surface_pressure)
         params_spec = [param_spec for param_spec in params_spec if param_spec['name'] not in params_current_dict]
         if not surface_pressure and SURFACE_PRESSURE_SHORTNAME in params_current_dict:
