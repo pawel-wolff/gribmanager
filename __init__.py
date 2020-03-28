@@ -26,6 +26,11 @@ from gribmanager.grib_manager import (
 )
 
 from gribmanager.parameter_manager_vectorized import (
+    MODEL_LEVEL_DIM,
+    PRESSURE_LEVEL_DIM,
+    LAT_DIM,
+    LON_DIM,
+    SURFACE_PRESSURE_SHORTNAME,
     HorizontalParameter,
     VerticalParameterInModelLevel,
     VerticalParameterInPressureLevel,

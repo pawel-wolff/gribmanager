@@ -16,6 +16,7 @@ MODEL_LEVEL_DIM = 'ml'
 PRESSURE_LEVEL_DIM = 'pl'
 LAT_DIM = 'lat'
 LON_DIM = 'lon'
+SURFACE_PRESSURE_SHORTNAME = 'sp'
 
 
 def clip_latitudes(arr):
@@ -385,7 +386,23 @@ class ParameterManager:
 
 _RESERVED_PARAM_SPEC_KEYS = ['name', 'param_id', 'must_be_unique']
 
-def load_grib_parameters(filename, params_spec):
+
+def load_grib_parameters(filenames, params_spec, surface_pressure=None):
+    if not isinstance(filenames, (list, tuple)):
+        filenames = (filenames, )
+    params_global_dict = {}
+    for filename in filenames:
+        params_current_dict = _load_grib_parameters_from_single_file(filename, params_spec, surface_pressure=surface_pressure)
+        params_spec = [param_spec for param_spec in params_spec if param_spec['name'] not in params_current_dict]
+        if not surface_pressure and SURFACE_PRESSURE_SHORTNAME in params_current_dict:
+            surface_pressure = params_current_dict[SURFACE_PRESSURE_SHORTNAME]
+        params_global_dict.update(params_current_dict)
+    if params_spec:
+        raise ValueError(f'In GRIB file(s) {filenames} {len(params_spec)} parameters were not found: {params_spec}')
+    return params_global_dict
+
+
+def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressure=None):
     """
     Load ECMWF parameters contained in a GRIB file
 
@@ -397,6 +414,7 @@ def load_grib_parameters(filename, params_spec):
     key: 'must_be_unique', value: bool; indicates whether the parameter is expected to be represented by a single GRIB message
     Furthermore, the following keys are optional:
     key: any valid GRIB key, value: a single value or a list of values of the GRIB key to be used as a filter of GRIB messages
+    :param surface_pressure, value: HorizontalParameter; a surfrace pressure parameter if it is known and None otherwise
     :return: a dict of Parameter objects, with keys being names given in params_spec
     """
     def get_param_by_id(param_id, must_be_unique, filter_on=None):
@@ -422,7 +440,7 @@ def load_grib_parameters(filename, params_spec):
         else:
             filtered_grib_msgs = grib_msgs
         if not filtered_grib_msgs:
-            raise ValueError(f'no grib messages in the GRIB file {filename} with param_id={param_id} and filter_on={filter_on}')
+            return None
         if must_be_unique and len(filtered_grib_msgs) > 1:
             logger.warning(f'more than one grib message found in the GRIB file {filename} with param_id={param_id} and filter_on={filter_on}, '
                            f'while only one was expected; taking the last grib message; number of filtered messages={len(filtered_grib_msgs)}')
@@ -445,7 +463,6 @@ def load_grib_parameters(filename, params_spec):
             return HorizontalParameter(filtered_grib_msgs[0])
 
     params = {}
-    surface_pressure = None
     with gm.GribFileIndexedByWithCache(filename, gk.PARAMETER_ID) as grib:
         for param_spec in params_spec:
             name = param_spec['name']
@@ -458,5 +475,6 @@ def load_grib_parameters(filename, params_spec):
                 logger.exception(f'LOAD_GRIB_PAREMETERS_ERROR: cannot load ECMWF parameter from the GRIB file={filename} with name={name}, '
                                  f'param_id={param_id}, must_be_unique={must_be_unique}, filter_on={filter_on}', exc_info=e)
                 continue
-            params[name] = param
+            if param is not None:
+                params[name] = param
     return params
