@@ -421,7 +421,7 @@ def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressu
     """
     def get_param_by_id(param_id, must_be_unique, filter_on=None):
         nonlocal surface_pressure
-        grib_msgs = grib[param_id]
+        grib_msgs = grib.get(param_id, default=[])
         logger.debug(f'param_id={param_id}, len(grib_msgs)={len(grib_msgs)}, filter_on={filter_on}')
         if filter_on:
             filtered_grib_msgs = []
