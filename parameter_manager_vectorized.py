@@ -19,7 +19,7 @@ LON_DIM = 'lon'
 SURFACE_PRESSURE_SHORTNAME = 'sp'
 
 
-def clip_latitudes(arr):
+def clip_latitude(arr):
     """
     Limits values to the array to the interval [-90., 90.]
     and logs a warning if there is any value outside this interval.
@@ -34,6 +34,10 @@ def clip_latitudes(arr):
         return np.clip(arr, -90., 90.)
     else:
         return arr
+
+
+def normalize_longitude(arr, smallest_lon_coord):
+    return (arr - smallest_lon_coord) % 360. + smallest_lon_coord
 
 
 def clip_and_log(a_min, a_max, arr):
@@ -102,15 +106,14 @@ class HorizontalParameter(Parameter):
         super().__init__(grib_msg)
         arr, self.lat_coords, self.lon_coords = grib_msg.to_numpy_array()
         self.data = xr.DataArray(arr, coords={LAT_DIM: self.lat_coords, LON_DIM: self.lon_coords}, dims=(LAT_DIM, LON_DIM))
-        smallest_lon_coord = self.lon_coords[0]
-        self._normalize_lon = lambda lon: (lon - smallest_lon_coord) % 360. + smallest_lon_coord
+        self.smallest_lon_coord = self.lon_coords[0]
 
     def interp(self, lat=None, lon=None, pressure=None):
         coords = {}
         if lat is not None:
-            coords[LAT_DIM] = clip_latitudes(lat)
+            coords[LAT_DIM] = clip_latitude(lat)
         if lon is not None:
-            coords[LON_DIM] = self._normalize_lon(lon)
+            coords[LON_DIM] = normalize_longitude(lon, self.smallest_lon_coord)
         return self.data.interp(coords=coords, method='linear', assume_sorted=True)
 
     def interp_numpy(self, lat, lon, pressure=None):
@@ -131,7 +134,7 @@ class HorizontalParameter(Parameter):
             raise ValueError(f'lat and lon must have the same shape; lat.shape={lat.shape}, lon.shape={lon.shape}')
 
         points = (self.lat_coords, self.lon_coords)
-        xi = np.stack([clip_latitudes(lat), self._normalize_lon(lon)], axis=-1)
+        xi = np.stack([clip_latitude(lat), normalize_longitude(lon, self.smallest_lon_coord)], axis=-1)
         res = scipy.interpolate.interpn(points, self.data.values, xi, method='linear')
         return res if lat.shape != () else res.squeeze()
 
@@ -149,8 +152,7 @@ class VerticalParameter(Parameter):
         self.lon_coords = lon_coords_list[0]
         if not (lon_coords_stacked == self.lon_coords).all():
             raise ValueError(f'longitude coordinates are not coherent across levels; self={self}')
-        smallest_lon_coord = self.lon_coords[0]
-        self._normalize_lon = lambda lon: (lon - smallest_lon_coord) % 360. + smallest_lon_coord
+        self.smallest_lon_coord = self.lon_coords[0]
         data_stacked = np.stack(data_list)
         self.data = xr.DataArray(data_stacked,
                                  coords={level_dim: level_coords, LAT_DIM: self.lat_coords, LON_DIM: self.lon_coords},
@@ -226,9 +228,9 @@ class VerticalParameterInModelLevel(VerticalParameter):
         if ml is not None:
             coords[MODEL_LEVEL_DIM] = ml
         if lat is not None:
-            coords[LAT_DIM] = clip_latitudes(lat)
+            coords[LAT_DIM] = clip_latitude(lat)
         if lon is not None:
-            coords[LON_DIM] = self._normalize_lon(lon)
+            coords[LON_DIM] = normalize_longitude(lon, self.smallest_lon_coord)
         return self.data.interp(coords=coords, method='linear', assume_sorted=True)
 
     def interp_numpy(self, lat, lon, pressure):
@@ -263,7 +265,7 @@ class VerticalParameterInModelLevel(VerticalParameter):
         ml = (1 - weight) * self.ml_coords[lower_level_index] + weight * self.ml_coords[upper_level_index]
 
         points = (self.ml_coords, self.lat_coords, self.lon_coords)
-        xi = np.stack([ml, clip_latitudes(lat), self._normalize_lon(lon)], axis=-1)
+        xi = np.stack([ml, clip_latitude(lat), normalize_longitude(lon, self.smallest_lon_coord)], axis=-1)
         return scipy.interpolate.interpn(points, self.data.values, xi, method='linear')
 
 
@@ -293,9 +295,9 @@ class VerticalParameterInPressureLevel(VerticalParameter):
         if pressure is not None:
             coords[PRESSURE_LEVEL_DIM] = self.clip_pressures(pressure)
         if lat is not None:
-            coords[LAT_DIM] = clip_latitudes(lat)
+            coords[LAT_DIM] = clip_latitude(lat)
         if lon is not None:
-            coords[LON_DIM] = self._normalize_lon(lon)
+            coords[LON_DIM] = normalize_longitude(lon, self.smallest_lon_coord)
         return self.data.interp(coords=coords, method='linear', assume_sorted=True)
 
     def interp_numpy(self, lat, lon, pressure):
@@ -316,7 +318,7 @@ class VerticalParameterInPressureLevel(VerticalParameter):
             raise ValueError(f'lat, lon and pressure must have the same shape; lat.shape={lat.shape}, lon.shape={lon.shape}, pressure.shape={pressure.shape}')
 
         points = (self.pl_coords, self.lat_coords, self.lon_coords)
-        xi = np.stack([self.clip_pressures(pressure), clip_latitudes(lat), self._normalize_lon(lon)], axis=-1)
+        xi = np.stack([self.clip_pressures(pressure), clip_latitude(lat), normalize_longitude(lon, self.smallest_lon_coord)], axis=-1)
         return scipy.interpolate.interpn(points, self.data.values, xi, method='linear')
 
 
@@ -388,6 +390,20 @@ _RESERVED_PARAM_SPEC_KEYS = ['name', 'param_id', 'must_be_unique']
 
 
 def load_grib_parameters(filenames, params_spec, surface_pressure=None):
+    """
+    Load ECMWF parameters contained in a GRIB file
+
+    :param filename: a path to a GRIB file
+    :param params_spec: a list of dictionaries; each dictionary must specify an ECMWF parameter
+    to be loaded from the GRIB file. The dictionary must have the following keys and values:
+    key: 'name', value: str, must be unique within the params_spec list
+    key: 'param_id', value: int, ECMWF parameter id
+    key: 'must_be_unique', value: bool; indicates whether the parameter is expected to be represented by a single GRIB message
+    Furthermore, the following keys are optional:
+    key: any valid GRIB key, value: a single value or a list of values of the GRIB key to be used as a filter of GRIB messages
+    :param surface_pressure, value: HorizontalParameter; a surfrace pressure parameter if it is known and None otherwise
+    :return: a dict of Parameter objects, with keys being names given in params_spec
+    """
     if not isinstance(filenames, (list, tuple)):
         filenames = (filenames, )
     params_global_dict = {}
@@ -405,20 +421,6 @@ def load_grib_parameters(filenames, params_spec, surface_pressure=None):
 
 
 def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressure=None):
-    """
-    Load ECMWF parameters contained in a GRIB file
-
-    :param filename: a path to a GRIB file
-    :param params_spec: a list of dictionaries; each dictionary must specify an ECMWF parameter
-    to be loaded from the GRIB file. The dictionary must have the following keys and values:
-    key: 'name', value: str, must be unique within the params_spec list
-    key: 'param_id', value: int, ECMWF parameter id
-    key: 'must_be_unique', value: bool; indicates whether the parameter is expected to be represented by a single GRIB message
-    Furthermore, the following keys are optional:
-    key: any valid GRIB key, value: a single value or a list of values of the GRIB key to be used as a filter of GRIB messages
-    :param surface_pressure, value: HorizontalParameter; a surfrace pressure parameter if it is known and None otherwise
-    :return: a dict of Parameter objects, with keys being names given in params_spec
-    """
     def get_param_by_id(param_id, must_be_unique, filter_on=None):
         nonlocal surface_pressure
         grib_msgs = grib.get(param_id, default=[])
