@@ -391,9 +391,9 @@ _RESERVED_PARAM_SPEC_KEYS = ['name', 'param_id', 'must_be_unique']
 
 def load_grib_parameters(filenames, params_spec, surface_pressure=None):
     """
-    Load ECMWF parameters contained in a GRIB file
+    Load ECMWF parameters contained in a single or multiple GRIB files
 
-    :param filename: a path to a GRIB file
+    :param filenames: a path to a GRIB file or, in the case of multiple GIRB files, a list or a tuple of filenames
     :param params_spec: a list of dictionaries; each dictionary must specify an ECMWF parameter
     to be loaded from the GRIB file. The dictionary must have the following keys and values:
     key: 'name', value: str, must be unique within the params_spec list
