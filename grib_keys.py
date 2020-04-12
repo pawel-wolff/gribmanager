@@ -37,7 +37,13 @@ SHORT_NAME = 'parameter.shortName'
 UNITS = 'parameter.units'
 NAME = 'parameter.name'
 
+CLASS = 'mars.class'
+STREAM = 'mars.stream'
+TYPE = 'mars.type'
+
+
 REFERENCE_DATE = 'time.dataDate'
 REFERENCE_TIME = 'time.dataTime'
+STEP = 'time.startStep'
 
 SURFACE_PRESSURE_PARAM_ID = 134

@@ -75,6 +75,55 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
         else:
             return None
 
+    def get_metadata(self):
+        def mget(*keys):
+            v = None
+            for key in keys:
+                v = self.get(key)
+                if v:
+                    break
+            return v
+
+        md = {}
+
+        # Mars keys (https://apps.ecmwf.int/codes/grib/format/mars/)
+        md['class'] = mget(gk.CLASS, 'class')
+        md['stream'] = mget(gk.STREAM, 'stream')
+        md['type'] = mget(gk.TYPE, 'type')
+
+        # GRIB edition independent keys:
+        # namespace: parameter (https://apps.ecmwf.int/codes/grib/format/edition-independent/7/)
+        md['centre'] = self.get(gk.CENTRE)
+        md['centreDescription'] = self.get('centreDescription')
+        md['paramId'] = self.get(gk.PARAMETER_ID)
+        md['shortName'] = self.get(gk.SHORT_NAME)
+        md['units'] = self.get(gk.UNITS)
+        md['name'] = self.get(gk.NAME)
+
+        # namespace: time (https://apps.ecmwf.int/codes/grib/format/edition-independent/2/)
+        refDateTime = None
+        refDate = self.get(gk.REFERENCE_DATE)
+        if refDate is not None:
+            refDate = str(refDate)
+            if len(refDate) == 8:
+                refTime = self.get(gk.REFERENCE_TIME, 0)
+                refTime = f'{refTime:04d}'
+                refDateTime = f'{refDate[0:4]}-{refDate[4:6]}-{refDate[6:8]}T{refTime[0:2]}:{refTime[2:4]}'
+        refDateTime = np.datetime64(refDateTime)
+        md['referenceDateTime'] = refDateTime
+        step = self.get(gk.STEP)
+        if step is not None:
+            step = np.timedelta64(int(step), 'h')
+            md['timeStep'] = step
+        else:
+            step = np.timedelta64(0, 'h')
+        md['instantDateTime'] = refDateTime + step
+
+        # namespace: vertical (https://apps.ecmwf.int/codes/grib/format/edition-independent/3/)
+        md['typeOfLevel'] = self.get(gk.TYPE_OF_LEVEL)
+
+        return md
+
     def to_numpy_array(self):
         if not(gk.VALUES in self and self.get(gk.PACKING_TYPE) == gk.PACKING_TYPE_GRID_SIMPLE and self.get(gk.GRID_TYPE) == gk.GRID_TYPE_REGULAR_LL):
             return None

@@ -105,8 +105,10 @@ class HorizontalParameter(Parameter):
     def __init__(self, grib_msg: gm.GribMessage):
         super().__init__(grib_msg)
         arr, self.lat_coords, self.lon_coords = grib_msg.to_numpy_array()
-        self.data = xr.DataArray(arr, coords={LAT_DIM: self.lat_coords, LON_DIM: self.lon_coords}, dims=(LAT_DIM, LON_DIM))
         self.smallest_lon_coord = self.lon_coords[0]
+        self.data = xr.DataArray(arr, coords={LAT_DIM: self.lat_coords, LON_DIM: self.lon_coords}, dims=(LAT_DIM, LON_DIM))
+        metadata = grib_msg.get_metadata()
+        self.data.attrs.update(metadata)
 
     def interp(self, lat=None, lon=None, pressure=None):
         coords = {}
@@ -157,6 +159,8 @@ class VerticalParameter(Parameter):
         self.data = xr.DataArray(data_stacked,
                                  coords={level_dim: level_coords, LAT_DIM: self.lat_coords, LON_DIM: self.lon_coords},
                                  dims=(level_dim, LAT_DIM, LON_DIM)).sortby(level_dim)
+        metadata = grib_msgs_at_all_levels[0].get_metadata()
+        self.data.attrs.update(metadata)
 
 
 class VerticalParameterInModelLevel(VerticalParameter):
