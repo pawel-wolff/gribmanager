@@ -1,5 +1,6 @@
 # TODO: this package should be independent of grib_*; try to extract a common interface for any kind of spatial data
 
+import abc
 import functools
 import inspect
 import numpy as np
@@ -72,7 +73,7 @@ def _force_unique_grib_message_per_level(grib_msgs):
     return list(msg_by_level.values())
 
 
-class Parameter:
+class Parameter(abc.ABC):
     def __init__(self, grib_msg: gm.GribMessage):
         self.short_name = grib_msg.get(gk.SHORT_NAME)
         self.name = grib_msg.get(gk.NAME)
@@ -96,6 +97,14 @@ class Parameter:
             if implicit_interpolation_dimension in explicit_interpolation_dimensions:
                 coords[implicit_interpolation_dimension] = da[implicit_interpolation_dimension]
         return da.interp(coords=coords, method='linear', assume_sorted=True)
+
+    @abc.abstractmethod
+    def interp(self, lat=None, lon=None, pressure=None):
+        pass
+
+    @abc.abstractmethod
+    def interp_numpy(self, lat, lon, pressure=None):
+        pass
 
     def __repr__(self):
         return f'{type(self)}: {self.short_name} - {self.name} (parameter id={self.param_id})\ndata: {self.data}'
