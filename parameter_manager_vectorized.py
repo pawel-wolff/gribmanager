@@ -173,23 +173,34 @@ class VerticalParameter(Parameter):
 
 
 class VerticalParameterInModelLevel(VerticalParameter):
+    """
+    Vertical parameter with eta vertical coordinate (a.k.a. hybrid sigma vertical coordinate, c.f.
+    https://rda.ucar.edu/datasets/ds627.0/docs/Eta_coordinate/
+    or
+    https://confluence.ecmwf.int/display/OIFS/4.4+OpenIFS%3A+Vertical+Resolution+and+Configuration
+    or
+    https://www.ecmwf.int/en/elibrary/16647-part-iii-dynamics-and-numerical-procedures
+    (Part III, Chapter 2)
+    """
     # TODO: manage failure cases
-    def __init__(self, grib_msgs_at_all_levels: Iterable[gm.GribMessage], surface_pressure: HorizontalParameter):
+    def __init__(self, grib_msgs_at_all_levels: Iterable[gm.GribMessage], surface_pressure: HorizontalParameter,
+                 parameter_on_half_levels=None):
         # TODO: test if this works properly; permute grib_msgs_at_all_levels, a see if the ndarray self.values.values has changed accordingly
         """
 
         :param grib_msgs_at_all_levels: an iterable with GRIB messages corresponding to a given parameter at its all vertical levels
-        :param surface_pressure:
+        :param surface_pressure: HorizontalParameter containing surface pressure
+        :param parameter_on_half_levels: optional; if True, the parameter is considered to be given at half-levels of eta vertical coordinate
         """
         grib_msgs_at_all_levels = _force_unique_grib_message_per_level(grib_msgs_at_all_levels)
         self._surface_pressure = surface_pressure
         self.no_levels = len(grib_msgs_at_all_levels)
         if self.no_levels == 0:
             raise ValueError(f'grib_msgs_at_all_levels={grib_msgs_at_all_levels}')
-        self.ml_coords, self.a_in_Pa, self.b_coeff = self._get_model_level_coords_and_coeffs(grib_msgs_at_all_levels)
+        self.ml_coords, self.a_in_Pa, self.b_coeff = self._get_model_level_coords_and_coeffs(grib_msgs_at_all_levels, parameter_on_half_levels)
         super().__init__(grib_msgs_at_all_levels, level_coords=self.ml_coords, level_dim=MODEL_LEVEL_DIM)
 
-    def _get_model_level_coords_and_coeffs(self, grib_msgs_at_all_levels):
+    def _get_model_level_coords_and_coeffs(self, grib_msgs_at_all_levels, parameter_on_half_levels):
         type_of_level, paramater_level_index, ab_list \
             = zip(*((msg[gk.TYPE_OF_LEVEL],
                      msg[gk.LEVEL],
@@ -199,7 +210,10 @@ class VerticalParameterInModelLevel(VerticalParameter):
             d = {l: tl for l, tl in zip(paramater_level_index, type_of_level) if tl != gk.HYBRID_LEVEL_TYPE}
             raise ValueError(f'Some levels are not {gk.HYBRID_LEVEL_TYPE}: {d}')
 
-        parameter_level_coords = np.asarray(paramater_level_index) # + 0.5 if product is given at half-levels (or -0.5 ???)
+        parameter_level_coords = np.asarray(paramater_level_index)
+        if parameter_on_half_levels:
+            # add 0.5 to parameter_level_coords if the parameter is given at half-levels (or -0.5 ???)
+            parameter_level_coords = parameter_level_coords + 0.5
         paramater_level_index_with_guard = paramater_level_index + (max(paramater_level_index) + 1, )
         parameter_level_coords_with_guard = np.asarray(paramater_level_index_with_guard)
         ab_stacked = np.stack(ab_list)
