@@ -287,8 +287,11 @@ class VerticalParameterInModelLevel(VerticalParameter):
         pressure_indices = tuple(np.indices(pressure.shape)) # if pressure is d-dim ndarray, then pressure_indices is a list od d d-dim ndarrays with indicies along corresponding dimension
         pressure_lower = p[pressure_indices + (lower_level_index, )]
         pressure_upper = p[pressure_indices + (upper_level_index, )] # TODO: maybe with np.take one can make it better?
-        weight = np.where(np.isclose(pressure_upper, pressure_lower),
-                          0.5, (pressure - pressure_lower) / (pressure_upper - pressure_lower))
+        pressure_upper_minus_pressure_lower = pressure_upper - pressure_lower
+        pressure_upper_close_to_pressure_lower = np.isclose(pressure_upper_minus_pressure_lower, 0.)
+        pressure_minus_pressure_lower_bis = np.where(pressure_upper_close_to_pressure_lower, 1., pressure - pressure_lower)
+        pressure_upper_minus_pressure_lower_bis = np.where(pressure_upper_close_to_pressure_lower, 2., pressure_upper_minus_pressure_lower)
+        weight = pressure_minus_pressure_lower_bis / pressure_upper_minus_pressure_lower_bis
         ml = (1 - weight) * self.ml_coords[lower_level_index] + weight * self.ml_coords[upper_level_index]
 
         points = (self.ml_coords, self.lat_coords, self.lon_coords)
