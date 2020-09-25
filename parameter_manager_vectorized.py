@@ -419,7 +419,7 @@ class ParameterManager:
 _RESERVED_PARAM_SPEC_KEYS = ['name', 'param_id', 'must_be_unique']
 
 
-def load_grib_parameters(filenames, params_spec, surface_pressure=None):
+def load_grib_parameters(filenames, params_spec, ignore_not_found=False, surface_pressure=None):
     """
     Load ECMWF parameters contained in a single or multiple GRIB files
 
@@ -431,6 +431,7 @@ def load_grib_parameters(filenames, params_spec, surface_pressure=None):
     key: 'must_be_unique', value: bool; indicates whether the parameter is expected to be represented by a single GRIB message
     Furthermore, the following keys are optional:
     key: any valid GRIB key, value: a single value or a list of values of the GRIB key to be used as a filter of GRIB messages
+    :param ignore_not_found: optional, default False; if True then ignores parameters which cannot be found or loaded successfully
     :param surface_pressure, value: HorizontalParameter; a surfrace pressure parameter if it is known and None otherwise
     :return: a dict of Parameter objects, with keys being names given in params_spec
     """
@@ -445,7 +446,7 @@ def load_grib_parameters(filenames, params_spec, surface_pressure=None):
         if not surface_pressure and SURFACE_PRESSURE_SHORTNAME in params_current_dict:
             surface_pressure = params_current_dict[SURFACE_PRESSURE_SHORTNAME]
         params_global_dict.update(params_current_dict)
-    if params_spec:
+    if params_spec and not ignore_not_found:
         raise ValueError(f'In GRIB file(s) {filenames} {len(params_spec)} parameters were not found: {params_spec}')
     return params_global_dict
 
