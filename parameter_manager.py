@@ -172,7 +172,7 @@ class ParameterManager:
 
     def __init__(self, grib_filename):
         self._grib_filename = grib_filename
-        self._grib_file_indexed = gm.GribFileIndexedByWithCache(self._grib_filename, *ParameterManager._INDEXING_KEYS)
+        self._grib_file_indexed = gm.open_grib(self._grib_filename, index_keys=ParameterManager._INDEXING_KEYS)
 
     def get_parameter(self, param_id, predicate=None, must_be_unique=False):
         def arguments_to_string():

@@ -361,7 +361,7 @@ class ParameterManager:
 
     def __init__(self, grib_filename):
         self._grib_filename = grib_filename
-        self._grib_file_indexed = gm.GribFileIndexedByWithCache(self._grib_filename, *ParameterManager._INDEXING_KEYS)
+        self._grib_file_indexed = gm.open_grib(self._grib_filename, index_keys=ParameterManager._INDEXING_KEYS)
 
     def close(self):
         self._grib_file_indexed.close()
@@ -504,7 +504,7 @@ def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressu
                 msg.close()
 
     params = {}
-    with gm.GribFileIndexedByWithCache(filename, gk.PARAMETER_ID) as grib:
+    with gm.open_grib(filename, index_keys=gk.PARAMETER_ID) as grib:
         for param_spec in params_spec:
             name = param_spec['name']
             param_id = param_spec['param_id']

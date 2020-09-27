@@ -349,20 +349,24 @@ class _GribMessageKeyIterator(GribAbstractItem):
             raise StopIteration
 
 
-def open_grib(filename, index_keys=None, unique_indexing=False, headers_only=False):
+def open_grib(filename, index_keys=None, unique_indexing=False, headers_only=False, cache=False):
     if index_keys is None:
-        return GribFile(filename, headers_only=headers_only)
-    elif not unique_indexing:
-        return GribFileIndexedByWithCache(filename, *index_keys)
+        return GribFile(filename, headers_only=headers_only, cache=cache)
     else:
-        return GribFileUniquelyIndexedByWithCache(filename, *index_keys)
+        if not isinstance(index_keys, (tuple, list)):
+            index_keys = (index_keys, )
+        if not unique_indexing:
+            return GribFileIndexedBy(filename, *index_keys, cache=cache)
+        else:
+            return GribFileUniquelyIndexedBy(filename, *index_keys, cache=cache)
 
 
 class GribFile(GribAbstractItem):
-    def __init__(self, filename, headers_only=False):
+    def __init__(self, filename, headers_only=False, cache=False):
         self._file = None
         super().__init__()
         self._headers_only = headers_only
+        self._cache = cache
         self._filename = str(filename)
         self._file = open(filename, 'rb')
         logger.debug(f'opened GribFile {str(self)}')
@@ -391,7 +395,10 @@ class GribFile(GribAbstractItem):
         # load a next message from self.file
         message_id = ecc.codes_grib_new_from_file(self.get_file(), headers_only=self._headers_only)
         if message_id is not None:
-            return GribMessageWithCache(message_id, self, headers_only=self._headers_only)
+            if self._cache:
+                return GribMessageWithCache(message_id, self, headers_only=self._headers_only)
+            else:
+                return GribMessage(message_id, self, headers_only=self._headers_only)
         else:
             raise StopIteration
 
@@ -405,11 +412,12 @@ class GribFile(GribAbstractItem):
 
 
 class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem):
-    def __init__(self, filename, *keys):
+    def __init__(self, filename, *keys, cache=False):
         super().__init__()
         if len(keys) == 0:
             raise Exception('index must contain at least one key')
         self._keys = keys
+        self._cache = cache
         self._filename = str(filename)
         self._id = ecc.codes_index_new_from_file(self._filename, self._keys)
         logger.debug(f'initialized GribFileIndexedBy id={self.get_id()}, filename={self._filename}')
@@ -441,7 +449,7 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
             ecc.codes_index_select(self.get_id(), key, index)
         value = []
         try:
-            for msg in _GribMessagesFromIndexGenerator(self):
+            for msg in _GribMessagesFromIndexGenerator(self, self._cache):
                 value.append(msg)
         except Exception as e:
             for msg in value:
@@ -467,10 +475,6 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
             raise KeyError(f'Invalid key={key}. Available keys={self._keys}')
 
 
-class GribFileIndexedByWithCache(abstract_dictionary.AbstractCacheDictionary, GribFileIndexedBy):
-    pass
-
-
 class GribFileUniquelyIndexedBy(GribFileIndexedBy):
     def __getitem__(self, index):
         value = super().__getitem__(index)
@@ -479,13 +483,10 @@ class GribFileUniquelyIndexedBy(GribFileIndexedBy):
         return value[0]
 
 
-class GribFileUniquelyIndexedByWithCache(abstract_dictionary.AbstractCacheDictionary, GribFileUniquelyIndexedBy):
-    pass
-
-
 class _GribMessagesFromIndexGenerator:
-    def __init__(self, grib_file_indexed):
+    def __init__(self, grib_file_indexed, cache=False):
         self._grib_file_indexed = grib_file_indexed
+        self._cache = cache
 
     def __iter__(self):
         return self
@@ -493,6 +494,9 @@ class _GribMessagesFromIndexGenerator:
     def __next__(self):
         message_id = ecc.codes_new_from_index(self._grib_file_indexed.get_id())
         if message_id is not None:
-            return GribMessageWithCache(message_id, self._grib_file_indexed)
+            if self._cache:
+                return GribMessageWithCache(message_id, self._grib_file_indexed)
+            else:
+                return GribMessage(message_id, self._grib_file_indexed)
         else:
             raise StopIteration
