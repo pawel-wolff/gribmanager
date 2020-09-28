@@ -106,8 +106,11 @@ class Parameter(abc.ABC):
     def interp_numpy(self, lat, lon, pressure=None):
         pass
 
+    def __str__(self):
+        return f'{type(self)}:\n\t{self.short_name} - {self.name} (parameter id={self.param_id})'
+
     def __repr__(self):
-        return f'{type(self)}: {self.short_name} - {self.name} (parameter id={self.param_id})\ndata: {self.data}'
+        return f'{type(self)}:\n\t{self.short_name} - {self.name} (parameter id={self.param_id})\n\tdata: {self.data}'
 
 
 class HorizontalParameter(Parameter):
