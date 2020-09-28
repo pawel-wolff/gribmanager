@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import scipy.interpolate
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 from common.log import logger
 from common import longitude, utils, interpolation
 from gribmanager import grib_keys as gk, grib_manager as gm
@@ -183,22 +183,28 @@ class VerticalParameterInModelLevel(VerticalParameter):
     (Part III, Chapter 2)
     """
     # TODO: manage failure cases
-    def __init__(self, grib_msgs_at_all_levels: Iterable[gm.GribMessage], surface_pressure: HorizontalParameter,
+    def __init__(self,
+                 grib_msgs_at_all_levels: Iterable[gm.GribMessage],
+                 surface_pressure: Optional[HorizontalParameter] = None,
                  parameter_on_half_levels=None):
         # TODO: test if this works properly; permute grib_msgs_at_all_levels, a see if the ndarray self.values.values has changed accordingly
         """
 
         :param grib_msgs_at_all_levels: an iterable with GRIB messages corresponding to a given parameter at its all vertical levels
-        :param surface_pressure: HorizontalParameter containing surface pressure
+        :param surface_pressure: optional; HorizontalParameter containing surface pressure
         :param parameter_on_half_levels: optional; if True, the parameter is considered to be given at half-levels of eta vertical coordinate
         """
         grib_msgs_at_all_levels = _force_unique_grib_message_per_level(grib_msgs_at_all_levels)
-        self._surface_pressure = surface_pressure
+        self._surface_pressure = None
+        self.set_surface_pressure(surface_pressure)
         self.no_levels = len(grib_msgs_at_all_levels)
         if self.no_levels == 0:
             raise ValueError(f'grib_msgs_at_all_levels={grib_msgs_at_all_levels}')
         self.ml_coords, self.a_in_Pa, self.b_coeff = self._get_model_level_coords_and_coeffs(grib_msgs_at_all_levels, parameter_on_half_levels)
         super().__init__(grib_msgs_at_all_levels, level_coords=self.ml_coords, level_dim=MODEL_LEVEL_DIM)
+
+    def set_surface_pressure(self, surface_pressure: HorizontalParameter):
+        self._surface_pressure = surface_pressure
 
     def _get_model_level_coords_and_coeffs(self, grib_msgs_at_all_levels, parameter_on_half_levels):
         type_of_level, paramater_level_index, ab_list \
@@ -236,6 +242,8 @@ class VerticalParameterInModelLevel(VerticalParameter):
         if pressure is None:
             ml = None
         else:
+            if self._surface_pressure is None:
+                raise ValueError(f'{self} does not know a surface pressure')
             sp = self._surface_pressure.interp(lat=lat, lon=lon)
             p = sp * self.b_coeff + self.a_in_Pa
             # p(t, ml) is increasing in ml; find interpolated ml(t) such that p(t, ml(t)) = p_0(t) for all t
@@ -277,7 +285,8 @@ class VerticalParameterInModelLevel(VerticalParameter):
         lon = np.asarray(lon)
         if not (pressure.shape == lat.shape == lon.shape):
             raise ValueError(f'lat, lon and pressure must have the same shape; lat.shape={lat.shape}, lon.shape={lon.shape}, pressure.shape={pressure.shape}')
-
+        if self._surface_pressure is None:
+            raise ValueError(f'{self} does not know a surface pressure')
         sp = self._surface_pressure.interp_numpy(lat=lat, lon=lon)
         p = np.multiply.outer(sp, self.b_coeff.values) + self.a_in_Pa.values
         # p(t, x) is increasing in x; find interpolated x(t) st p(t, x(t)) = p_0(t) for all t
@@ -419,20 +428,24 @@ class ParameterManager:
 _RESERVED_PARAM_SPEC_KEYS = ['name', 'param_id', 'must_be_unique']
 
 
-def load_grib_parameters(filenames, params_spec, ignore_not_found=False, surface_pressure=None):
+def load_grib_parameters(filenames, params_spec, ignore_not_found=False, surface_pressure=None, use_eccodes_index=False):
     """
     Load ECMWF parameters contained in a single or multiple GRIB files
 
     :param filenames: a path to a GRIB file or, in the case of multiple GIRB files, a list or a tuple of filenames
     :param params_spec: a list of dictionaries; each dictionary must specify an ECMWF parameter
     to be loaded from the GRIB file. The dictionary must have the following keys and values:
-    key: 'name', value: str, must be unique within the params_spec list
+    key: 'name', value: str, must be unique within the params_spec list; use 'sp' for a surface pressure parameter
+    as it will be used to interpolate parameters in model level (unless a surface pressure parameter is explicitly
+    passed via 'surface_pressure' parameter)
     key: 'param_id', value: int, ECMWF parameter id
     key: 'must_be_unique', value: bool; indicates whether the parameter is expected to be represented by a single GRIB message
     Furthermore, the following keys are optional:
     key: any valid GRIB key, value: a single value or a list of values of the GRIB key to be used as a filter of GRIB messages
     :param ignore_not_found: optional, default False; if True then ignores parameters which cannot be found or loaded successfully
     :param surface_pressure, value: HorizontalParameter; a surfrace pressure parameter if it is known and None otherwise
+    :param use_eccodes_index: optional, default False; if True then uses an ecCodes' indexing feature
+    (not recommended because of apparent file descriptor leak - 28/09/2020)
     :return: a dict of Parameter objects, with keys being names given in params_spec
     """
     if not isinstance(filenames, (list, tuple)):
@@ -441,7 +454,10 @@ def load_grib_parameters(filenames, params_spec, ignore_not_found=False, surface
     for filename in filenames:
         if not params_spec:
             break
-        params_current_dict = _load_grib_parameters_from_single_file(filename, params_spec, surface_pressure=surface_pressure)
+        if use_eccodes_index:
+            params_current_dict = _load_grib_parameters_from_single_file_using_index(filename, params_spec, surface_pressure=surface_pressure)
+        else:
+            params_current_dict = _load_grib_parameters_from_single_file(filename, params_spec, surface_pressure=surface_pressure)
         params_spec = [param_spec for param_spec in params_spec if param_spec['name'] not in params_current_dict]
         if not surface_pressure and SURFACE_PRESSURE_SHORTNAME in params_current_dict:
             surface_pressure = params_current_dict[SURFACE_PRESSURE_SHORTNAME]
@@ -452,6 +468,120 @@ def load_grib_parameters(filenames, params_spec, ignore_not_found=False, surface
 
 
 def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressure=None):
+    def get_param_from_msgs(msgs, param_spec):
+        if param_spec['must_be_unique'] and len(msgs) > 1:
+            logger.warning(
+                f'{len(msgs)} GRIB messages were found in the GRIB file {filename} with param_spec={param_spec} '
+                f'while only one was expected; taking the last GRIB message')
+            msgs = msgs[-1:]
+
+        if len(msgs) > 1:
+            # vertical (3d) parameter
+            if all(msg.is_level_hybrid() for msg in msgs):
+                return VerticalParameterInModelLevel(msgs, surface_pressure=surface_pressure)
+            elif all(msg.is_level_isobaric() for msg in msgs):
+                return VerticalParameterInPressureLevel(msgs)
+            else:
+                raise ValueError(
+                    f'messages in GRIB file {filename} filtered according to param_spec={param_spec} '
+                    f'does not form any known vertical parameter (neither it is in model level nor in pressure level); '
+                    f'number of filtered messages={len(msgs)}')
+        else:
+            # len(grib_msgs) == 1
+            # horizontal (2d) parameter
+            return HorizontalParameter(msgs[0])
+
+    open_msgs = []
+    try:
+        # here we build a dictionary (param_name, list of GRIB messages)
+        msgs_by_param_name = {}
+        params_spec_group_by_param_id = utils.groupby(params_spec, lambda param_spec: param_spec['param_id'])
+        with gm.open_grib(filename) as grib:
+            for msg in grib:
+                try:
+                    keep_msg_open = False
+                    try:
+                        param_id = msg[gk.PARAMETER_ID]
+                    except KeyError:
+                        logger.warning(
+                            f'grib message {msg} in the GRIB file {filename} does not have the GRIB key={gk.PARAMETER_ID}; '
+                            f'the message is ignored'
+                        )
+                        msg.close()
+                        continue
+                    try:
+                        params_spec_group = params_spec_group_by_param_id[param_id]
+                    except KeyError:
+                        msg.close()
+                        continue
+                    for param_spec in params_spec_group:
+                        filter_on = [(key, value) for key, value in param_spec.items() if
+                                     key not in _RESERVED_PARAM_SPEC_KEYS]
+                        cond = True
+                        for key, value in filter_on:
+                            try:
+                                v = msg[key]
+                            except KeyError:
+                                logger.warning(
+                                    f'grib message {msg} in the GRIB file {filename} does not have the GRIB key={key} '
+                                    f'on which it was supposed to be filtered; value={value}; the message is ignored')
+                                cond = False
+                                break
+                            if isinstance(value, (list, tuple)):
+                                cond = cond and v in value
+                            else:
+                                cond = cond and v == value
+                        if cond:
+                            keep_msg_open = True
+                            param_name = param_spec['name']
+                            msgs_by_param_name.setdefault(param_name, []).append(msg)
+
+                    if keep_msg_open:
+                        open_msgs.append(msg)
+                    else:
+                        msg.close()
+                except Exception as e:
+                    msg.close()
+                    raise e
+
+        # we build Parameters from GIRB messages
+        param_by_param_name = {}
+        for param_spec in params_spec:
+            param_name = param_spec['name']
+            try:
+                msgs = msgs_by_param_name[param_name]
+            except KeyError:
+                continue
+            try:
+                param = get_param_from_msgs(msgs, param_spec)
+            except Exception as e:
+                logger.exception(f'LOAD_GRIB_PAREMETERS_ERROR: cannot load ECMWF parameter from the GRIB file={filename} '
+                                 f'with param_spec={param_spec}', exc_info=e)
+                continue
+            if param is not None:
+                param_by_param_name[param_name] = param
+
+        # complete eventual VerticalParameterInModelLevel's with surface pressure parameter
+        # if that one was read in the GRIB file
+        if surface_pressure is None and SURFACE_PRESSURE_SHORTNAME in param_by_param_name:
+            just_read_surface_pressure = param_by_param_name[SURFACE_PRESSURE_SHORTNAME]
+            if isinstance(just_read_surface_pressure, HorizontalParameter):
+                for param in param_by_param_name.values():
+                    if isinstance(param, VerticalParameterInModelLevel):
+                        param.set_surface_pressure(just_read_surface_pressure)
+            else:
+                surface_pressure_spec = utils.unique(param_spec for param_spec in params_spec if param_spec['name'] == SURFACE_PRESSURE_SHORTNAME)
+                logger.warning(f'a surface pressure read from the GRIB file={filename} '
+                               f'using param_spec={surface_pressure_spec} is not a HorizontalParameter; '
+                               f'it is: {just_read_surface_pressure}')
+        return param_by_param_name
+    finally:
+        # whatever happens (normal return or an exception), we do a cleanup
+        for msg in open_msgs:
+            msg.close()
+
+
+def _load_grib_parameters_from_single_file_using_index(filename, params_spec, surface_pressure=None):
     def get_param_by_id(param_id, must_be_unique, filter_on=None):
         nonlocal surface_pressure
         grib_msgs = grib.get(param_id, default=[])
@@ -466,6 +596,7 @@ def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressu
                             v = msg[key]
                         except KeyError:
                             logger.warning(f'grib message {msg} in the GRIB file {filename} does not have the GRIB key={key} on which it was supposed to be filtered; value={value}')
+                            cond = False
                             break
                         if isinstance(value, (list, tuple)):
                             cond = cond and v in value
