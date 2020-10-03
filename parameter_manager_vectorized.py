@@ -435,16 +435,18 @@ def load_grib_parameters(filenames, params_spec, ignore_not_found=False, surface
     """
     Load ECMWF parameters contained in a single or multiple GRIB files
 
-    :param filenames: a path to a GRIB file or, in the case of multiple GIRB files, a list or a tuple of filenames
+    :param filenames: a path to a GRIB file or, in the case of multiple GIRB files, a list or a tuple of filenames.
+    In case of conflicting parameters read from several files, the parameter from the latest file is kept.
     :param params_spec: a list of dictionaries; each dictionary must specify an ECMWF parameter
     to be loaded from the GRIB file. The dictionary must have the following keys and values:
-    key: 'name', value: str, must be unique within the params_spec list; use 'sp' for a surface pressure parameter
-    as it will be used to interpolate parameters in model level (unless a surface pressure parameter is explicitly
-    passed via 'surface_pressure' parameter)
+    key: 'name', value: str; use 'sp' for a surface pressure parameter as it will be used to interpolate parameters
+    in model level (unless a surface pressure parameter is explicitly passed via 'surface_pressure' parameter)
     key: 'param_id', value: int, ECMWF parameter id
     key: 'must_be_unique', value: bool; indicates whether the parameter is expected to be represented by a single GRIB message
     Furthermore, the following keys are optional:
-    key: any valid GRIB key, value: a single value or a list of values of the GRIB key to be used as a filter of GRIB messages
+    key: any valid GRIB key, value: a single value or a list of values of the GRIB key to be used as a filter of GRIB messages.
+    In case of conflicting parameters read from the same file via several different specification entries, the parameter
+    corresponding to the earliest specification on the list is kept.
     :param ignore_not_found: optional, default False; if True then ignores parameters which cannot be found or loaded successfully
     :param surface_pressure, value: HorizontalParameter; a surfrace pressure parameter if it is known and None otherwise
     :param use_eccodes_index: optional, default False; if True then uses an ecCodes' indexing feature
@@ -498,7 +500,11 @@ def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressu
     try:
         # here we build a dictionary (param_name, list of GRIB messages)
         msgs_by_param_name = {}
-        params_spec_group_by_param_id = utils.groupby(params_spec, lambda param_spec: param_spec['param_id'])
+        spec_priority_by_param_name = {}
+        group_of_priority_and_param_spec_by_param_id = \
+            utils.groupby(enumerate(params_spec),
+                          lambda priority_and_param_spec: priority_and_param_spec[1]['param_id'])
+
         with gm.open_grib(filename) as grib:
             for msg in grib:
                 try:
@@ -513,11 +519,11 @@ def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressu
                         msg.close()
                         continue
                     try:
-                        params_spec_group = params_spec_group_by_param_id[param_id]
+                        group_of_priority_and_param_spec = group_of_priority_and_param_spec_by_param_id[param_id]
                     except KeyError:
                         msg.close()
                         continue
-                    for param_spec in params_spec_group:
+                    for spec_priority, param_spec in group_of_priority_and_param_spec:
                         filter_on = [(key, value) for key, value in param_spec.items() if
                                      key not in _RESERVED_PARAM_SPEC_KEYS]
                         cond = True
@@ -535,9 +541,14 @@ def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressu
                             else:
                                 cond = cond and v == value
                         if cond:
-                            keep_msg_open = True
                             param_name = param_spec['name']
-                            msgs_by_param_name.setdefault(param_name, []).append(msg)
+                            previous_spec_priority = spec_priority_by_param_name.get(param_name, default=None)
+                            if previous_spec_priority is None or previous_spec_priority > spec_priority:
+                                spec_priority_by_param_name[param_name] = spec_priority
+                                if previous_spec_priority is not None:
+                                    del spec_priority_by_param_name[param_name]
+                                msgs_by_param_name.setdefault(param_name, []).append(msg)
+                                keep_msg_open = True
 
                     if keep_msg_open:
                         open_msgs.append(msg)
