@@ -542,7 +542,7 @@ def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressu
                                 cond = cond and v == value
                         if cond:
                             param_name = param_spec['name']
-                            previous_spec_priority = spec_priority_by_param_name.get(param_name, default=None)
+                            previous_spec_priority = spec_priority_by_param_name.get(param_name)
                             if previous_spec_priority is None or previous_spec_priority > spec_priority:
                                 spec_priority_by_param_name[param_name] = spec_priority
                                 if previous_spec_priority is not None:
