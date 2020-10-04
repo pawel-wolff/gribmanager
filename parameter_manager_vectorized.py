@@ -545,7 +545,7 @@ def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressu
                             previous_spec_priority = spec_priority_by_param_name.get(param_name)
                             if previous_spec_priority is None or spec_priority <= previous_spec_priority:
                                 spec_priority_by_param_name[param_name] = spec_priority
-                                if previous_spec_priority is not None:
+                                if previous_spec_priority is not None and spec_priority < previous_spec_priority:
                                     del msgs_by_param_name[param_name]
                                 msgs_by_param_name.setdefault(param_name, []).append(msg)
                                 keep_msg_open = True
