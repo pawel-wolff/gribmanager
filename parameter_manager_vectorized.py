@@ -462,17 +462,36 @@ def load_grib_parameters(filenames, params_spec, ignore_not_found=False, surface
         if use_eccodes_index:
             params_current_dict = _load_grib_parameters_from_single_file_using_index(filename, params_spec, surface_pressure=surface_pressure)
         else:
-            params_current_dict = _load_grib_parameters_from_single_file(filename, params_spec, surface_pressure=surface_pressure)
+            params_current_dict = _load_grib_parameters_from_single_file(filename, params_spec)
         params_spec = [param_spec for param_spec in params_spec if param_spec['name'] not in params_current_dict]
         if not surface_pressure and SURFACE_PRESSURE_SHORTNAME in params_current_dict:
             surface_pressure = params_current_dict[SURFACE_PRESSURE_SHORTNAME]
         params_global_dict.update(params_current_dict)
+
+    # check if all demanded parameters where found
     if params_spec and not ignore_not_found:
         raise ValueError(f'In GRIB file(s) {filenames} {len(params_spec)} parameters were not found: {params_spec}')
+
+    # complete eventual VerticalParameterInModelLevel's with surface pressure parameter
+    # if that one was read in the GRIB file
+    if surface_pressure is None:
+        surface_pressure = params_global_dict.get(SURFACE_PRESSURE_SHORTNAME)
+    if surface_pressure is not None:
+        if isinstance(surface_pressure, HorizontalParameter):
+            for param in params_global_dict.values():
+                if isinstance(param, VerticalParameterInModelLevel):
+                    param.set_surface_pressure(surface_pressure)
+        else:
+            surface_pressure_spec = \
+                [param_spec for param_spec in params_spec if param_spec['name'] == SURFACE_PRESSURE_SHORTNAME]
+            logger().warning(f'a surface pressure read from the GRIB file(s)={filenames} '
+                             f'using param_spec={surface_pressure_spec} is not a HorizontalParameter; '
+                             f'it is: {surface_pressure}')
+
     return params_global_dict
 
 
-def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressure=None):
+def _load_grib_parameters_from_single_file(filename, params_spec):
     def get_param_from_msgs(msgs, param_spec):
         if param_spec['must_be_unique'] and len(msgs) > 1:
             logger().warning(
@@ -483,7 +502,7 @@ def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressu
         if len(msgs) > 1:
             # vertical (3d) parameter
             if all(msg.is_level_hybrid() for msg in msgs):
-                return VerticalParameterInModelLevel(msgs, surface_pressure=surface_pressure)
+                return VerticalParameterInModelLevel(msgs)
             elif all(msg.is_level_isobaric() for msg in msgs):
                 return VerticalParameterInPressureLevel(msgs)
             else:
@@ -574,20 +593,6 @@ def _load_grib_parameters_from_single_file(filename, params_spec, surface_pressu
                 continue
             if param is not None:
                 param_by_param_name[param_name] = param
-
-        # complete eventual VerticalParameterInModelLevel's with surface pressure parameter
-        # if that one was read in the GRIB file
-        if surface_pressure is None and SURFACE_PRESSURE_SHORTNAME in param_by_param_name:
-            just_read_surface_pressure = param_by_param_name[SURFACE_PRESSURE_SHORTNAME]
-            if isinstance(just_read_surface_pressure, HorizontalParameter):
-                for param in param_by_param_name.values():
-                    if isinstance(param, VerticalParameterInModelLevel):
-                        param.set_surface_pressure(just_read_surface_pressure)
-            else:
-                surface_pressure_spec = utils.unique(param_spec for param_spec in params_spec if param_spec['name'] == SURFACE_PRESSURE_SHORTNAME)
-                logger().warning(f'a surface pressure read from the GRIB file={filename} '
-                               f'using param_spec={surface_pressure_spec} is not a HorizontalParameter; '
-                               f'it is: {just_read_surface_pressure}')
         return param_by_param_name
     finally:
         # whatever happens (normal return or an exception), we do a cleanup
