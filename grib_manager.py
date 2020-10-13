@@ -66,6 +66,7 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
             d_lon = abs(self[gk.DELTA_LONGITUDE]) * (-1 if self[gk.DELTA_LONGITUDE_NEGATIVE] else 1)
             lat_major = False if self[gk.LATITUDE_MINOR_LONGITUDE_MAJOR] else True
             n_lat, n_lon = self[gk.NO_LATITUDES], self[gk.NO_LONGITUDES]
+            # TODO: add error messages
             if n_lat <= 1 or n_lon <= 1:
                 raise ValueError
             if not math.isclose(lat0 + (n_lat - 1) * d_lat, lat1):
@@ -134,6 +135,7 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
         d_lon = abs(self[gk.DELTA_LONGITUDE]) * (-1 if self[gk.DELTA_LONGITUDE_NEGATIVE] else 1)
         lat_major = False if self[gk.LATITUDE_MINOR_LONGITUDE_MAJOR] else True
         n_lat, n_lon = self[gk.NO_LATITUDES], self[gk.NO_LONGITUDES]
+        # TODO: add error messages
         if n_lat <= 1 or n_lon <= 1:
             raise ValueError
         if not math.isclose(lat0 + (n_lat - 1) * d_lat - lat1, 0.):

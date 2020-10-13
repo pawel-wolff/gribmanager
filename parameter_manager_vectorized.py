@@ -589,7 +589,7 @@ def _load_grib_parameters_from_single_file(filename, params_spec):
                 param = get_param_from_msgs(msgs, param_spec)
             except Exception as e:
                 logger().exception(f'LOAD_GRIB_PAREMETERS_ERROR: cannot load ECMWF parameter from the GRIB file={filename} '
-                                 f'with param_spec={param_spec}', exc_info=e)
+                                   f'with param_spec={param_spec}', exc_info=e)
                 continue
             if param is not None:
                 param_by_param_name[param_name] = param
