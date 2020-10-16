@@ -9,7 +9,8 @@ import xarray as xr
 import scipy.interpolate
 from typing import Iterable, List, Optional
 from common.log import logger
-from common import longitude, utils, interpolation
+from common import utils
+from common.longitude import normalize_longitude
 from gribmanager import grib_keys as gk, grib_manager as gm
 
 
@@ -35,10 +36,6 @@ def clip_latitude(arr):
         return np.clip(arr, -90., 90.)
     else:
         return arr
-
-
-def normalize_longitude(arr, smallest_lon_coord):
-    return (arr - smallest_lon_coord) % 360. + smallest_lon_coord
 
 
 def clip_and_log(a_min, a_max, arr):
