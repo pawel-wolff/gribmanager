@@ -434,7 +434,7 @@ def load_grib_parameters(filenames, params_spec, ignore_not_found=False, surface
 
     :param filenames: a path to a GRIB file or, in the case of multiple GIRB files, a list or a tuple of filenames.
     In case of conflicting parameters read from several files, the parameter from the latest file is kept.
-    :param params_spec: a list of dictionaries; each dictionary must specify an ECMWF parameter
+    :param params_spec: a dictionary or a list of dictionaries; each dictionary must specify an ECMWF parameter
     to be loaded from the GRIB file. The dictionary must have the following keys and values:
     key: 'name', value: str; use 'sp' for a surface pressure parameter as it will be used to interpolate parameters
     in model level (unless a surface pressure parameter is explicitly passed via 'surface_pressure' parameter)
@@ -452,6 +452,8 @@ def load_grib_parameters(filenames, params_spec, ignore_not_found=False, surface
     """
     if not isinstance(filenames, (list, tuple)):
         filenames = (filenames, )
+    if not isinstance(params_spec, (list, tuple)):
+        params_spec = (params_spec, )
     params_global_dict = {}
     for filename in filenames:
         if not params_spec:
