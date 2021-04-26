@@ -166,7 +166,7 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
             data = np.flip(data, axis=1)
 
         # check if the longitude coordinates are circular
-        lon_circular = np.isclose((n_lon * d_lon) % 360., [0., 360.], atol=1e-4)
+        lon_circular = np.isclose((n_lon * d_lon) % 360., [0., 360.], atol=1e-4).any()
         # if circular, pad circularly the data array with one element along the longitude axis;
         # it will be useful for interpolation
         if lon_circular:
