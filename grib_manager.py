@@ -55,24 +55,36 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
         # keep a reference to a grib file in order not to dispose the file before disposing the grib message
         self._grib_file = grib_file
         self._values = None
-        self._get_lat_lon_index_of_four_nearest_points = self._check_grid() if not headers_only else None
+        self._get_lat_lon_index_of_four_nearest_points = self._four_nearest_points_func() if not headers_only else None
 
-    def _check_grid(self):
-        if gk.VALUES in self and self.get(gk.PACKING_TYPE) == gk.PACKING_TYPE_GRID_SIMPLE \
-                and self.get(gk.GRID_TYPE) == gk.GRID_TYPE_REGULAR_LL:
-            lat0, lon0 = self[gk.LATITUDE_OF_FIRST_GRID_POINT], self[gk.LONGITUDE_OF_FIRST_GRID_POINT]
-            lat1, lon1 = self[gk.LATITUDE_OF_LAST_GRID_POINT], self[gk.LONGITUDE_OF_LAST_GRID_POINT]
-            d_lat = abs(self[gk.DELTA_LATITUDE]) * (1 if self[gk.DELTA_LATITUDE_POSITIVE] else -1)
-            d_lon = abs(self[gk.DELTA_LONGITUDE]) * (-1 if self[gk.DELTA_LONGITUDE_NEGATIVE] else 1)
-            lat_major = False if self[gk.LATITUDE_MINOR_LONGITUDE_MAJOR] else True
-            n_lat, n_lon = self[gk.NO_LATITUDES], self[gk.NO_LONGITUDES]
-            # TODO: add error messages
-            if n_lat <= 1 or n_lon <= 1:
-                raise ValueError
-            if not math.isclose(lat0 + (n_lat - 1) * d_lat, lat1):
-                raise ValueError
-            # TODO: similar check for longitudes, but be careful
-            return functools.partial(utils.four_nearest_points_in_rectangular_grid, lat0, lon0, lat1, lon1, d_lat, d_lon, n_lat, n_lon, lat_major)
+    def _get_regular_grid_info(self):
+        if not (gk.VALUES in self and self.get(gk.PACKING_TYPE) == gk.PACKING_TYPE_GRID_SIMPLE
+                and self.get(gk.GRID_TYPE) == gk.GRID_TYPE_REGULAR_LL):
+            return None
+        lat0, lon0 = self[gk.LATITUDE_OF_FIRST_GRID_POINT], self[gk.LONGITUDE_OF_FIRST_GRID_POINT]
+        lat1, lon1 = self[gk.LATITUDE_OF_LAST_GRID_POINT], self[gk.LONGITUDE_OF_LAST_GRID_POINT]
+        d_lat = abs(self[gk.DELTA_LATITUDE]) * (1 if self[gk.DELTA_LATITUDE_POSITIVE] else -1)
+        d_lon = abs(self[gk.DELTA_LONGITUDE]) * (-1 if self[gk.DELTA_LONGITUDE_NEGATIVE] else 1)
+        lat_major = False if self[gk.LATITUDE_MINOR_LONGITUDE_MAJOR] else True
+        n_lat, n_lon = self[gk.NO_LATITUDES], self[gk.NO_LONGITUDES]
+        if n_lat <= 1:
+            raise ValueError(f'size of latitude grid must be >= 2; got {n_lat}')
+        if n_lon <= 1:
+            raise ValueError(f'size of longitude grid must be >= 2; got {n_lon}')
+        if not np.isclose(lat0 + (n_lat - 1) * d_lat - lat1, 0., atol=1e-4):
+            raise ValueError(f'latitude grid spacing, size and first and last point are not consistent: '
+                             f'got lat0={lat0}, lat1={lat1}, d_lat={d_lat}, n_lat={n_lat}')
+        if not np.isclose((lon0 + (n_lon - 1) * d_lon - lon1) % 360., [0., 360.], atol=1e-4).any():
+            raise ValueError(f'longitude grid spacing, size and first and last point are not consistent: '
+                             f'got lon0={lon0}, lon1={lon1}, d_lon={d_lon}, n_lon={n_lon}')
+        return lat0, lat1, d_lat, n_lat, lon0, lon1, d_lon, n_lon, lat_major
+
+    def _four_nearest_points_func(self):
+        grid_info = self._get_regular_grid_info()
+        if grid_info is not None:
+            lat0, lat1, d_lat, n_lat, lon0, lon1, d_lon, n_lon, lat_major = grid_info
+            return functools.partial(utils.four_nearest_points_in_rectangular_grid,
+                                     lat0, lon0, lat1, lon1, d_lat, d_lon, n_lat, n_lon, lat_major)
         else:
             return None
 
@@ -126,22 +138,13 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
         return md
 
     def to_numpy_array(self):
-        if not(gk.VALUES in self and self.get(gk.PACKING_TYPE) == gk.PACKING_TYPE_GRID_SIMPLE and self.get(gk.GRID_TYPE) == gk.GRID_TYPE_REGULAR_LL):
+        grid_info = self._get_regular_grid_info()
+        if grid_info is None:
             return None
-        data = np.array(self[gk.VALUES]) # this seems more safe, but maybe data = self[gk.VALUE] is enough? consider memory dealloc issues
-        lat0, lon0 = self[gk.LATITUDE_OF_FIRST_GRID_POINT], self[gk.LONGITUDE_OF_FIRST_GRID_POINT]
-        lat1, lon1 = self[gk.LATITUDE_OF_LAST_GRID_POINT], self[gk.LONGITUDE_OF_LAST_GRID_POINT]
-        d_lat = abs(self[gk.DELTA_LATITUDE]) * (1 if self[gk.DELTA_LATITUDE_POSITIVE] else -1)
-        d_lon = abs(self[gk.DELTA_LONGITUDE]) * (-1 if self[gk.DELTA_LONGITUDE_NEGATIVE] else 1)
-        lat_major = False if self[gk.LATITUDE_MINOR_LONGITUDE_MAJOR] else True
-        n_lat, n_lon = self[gk.NO_LATITUDES], self[gk.NO_LONGITUDES]
-        # TODO: add error messages
-        if n_lat <= 1 or n_lon <= 1:
-            raise ValueError
-        if not math.isclose(lat0 + (n_lat - 1) * d_lat - lat1, 0.):
-            raise ValueError
-        if not math.isclose((lon0 + (n_lon - 1) * d_lon - lon1) % 360., 0.):
-            raise ValueError
+        lat0, lat1, d_lat, n_lat, lon0, lon1, d_lon, n_lon, lat_major = grid_info
+
+        # this seems more safe, but maybe data = self[gk.VALUE] is enough? consider memory dealloc issues
+        data = np.array(self[gk.VALUES])
 
         # shape the data array according to n_lat, n_lon and lat_major
         m, n = (n_lat, n_lon) if lat_major else (n_lon, n_lat)
@@ -163,7 +166,7 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
             data = np.flip(data, axis=1)
 
         # check if the longitude coordinates are circular
-        lon_circular = math.isclose((n_lon * d_lon) % 360., 0)
+        lon_circular = np.isclose((n_lon * d_lon) % 360., [0., 360.], atol=1e-4)
         # if circular, pad circularly the data array with one element along the longitude axis;
         # it will be useful for interpolation
         if lon_circular:

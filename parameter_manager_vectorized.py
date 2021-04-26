@@ -103,6 +103,15 @@ class Parameter(abc.ABC):
     def interp_numpy(self, lat, lon, pressure=None):
         pass
 
+    def to_dataarray(self, circular=False):
+        da = self.data
+        is_data_circular = np.isclose((da[LON_DIM][-1] - da[LON_DIM][0]) % 360, [0., 360.], atol=1e-4).any()
+        if circular and not is_data_circular:
+            raise ValueError(f'longitude coordinate is not circular: {da[LON_DIM].values}')
+        if is_data_circular and not circular:
+            return da.isel({LON_DIM: slice(None, -1)})
+        return da
+
     def __str__(self):
         return f'{type(self)}:\n\t{self.short_name} - {self.name} (parameter id={self.param_id})'
 
