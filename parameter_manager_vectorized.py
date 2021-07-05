@@ -399,6 +399,13 @@ def load_grib_parameters(filenames, params_spec, ignore_not_found=False, surface
         filenames = (filenames, )
     if not isinstance(params_spec, (list, tuple)):
         params_spec = (params_spec, )
+
+    # check if params_spec is ok
+    for i, param_spec in enumerate(params_spec, start=1):
+        for k in ['name', 'param_id', 'must_be_unique']:
+            if k not in param_spec:
+                raise ValueError(f'the key "{k}" is missing in the parameter specification #{i}: {param_spec}')
+
     params_global_dict = {}
     for filename in filenames:
         if not params_spec:
