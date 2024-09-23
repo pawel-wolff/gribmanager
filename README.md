@@ -1,11 +1,11 @@
-# grib-manager
+# gribmanager
 
 An object-oriented Python wrapper around (a part) of ECMWF's ecCodes library.
 
 
 ## Description
 
-TODO
+Reads GRIB data format and performs 3D interpolation, capable of handling IFS' hybrid vertical coordinates.
 
 
 ## Installation
@@ -13,8 +13,8 @@ TODO
 ### Clone the git repository
 
 ```sh
-git clone https://github.com/pawel-wolff/grib_manager.git
-cd grib_manager
+git clone https://github.com/pawel-wolff/gribmanager.git
+cd gribmanager
 ```
 
 ### Install the package
@@ -32,5 +32,5 @@ python -m pip install --editable .
 ### Test your installation (requires a sample GRIB file)
 
 ```sh
-python tests/test_grib_manager.py
+python tests/test_gribmanager.py
 ```
