@@ -1,10 +1,13 @@
 import logging
 import functools
 import numpy as np
-import eccodes as ecc
 
 from . import utils
 from . import grib_keys as gk
+
+# placed here, otherwise pandas is improted later and it results in UserWarnings,
+# see: https://stackoverflow.com/questions/71168661/userwarning-the-value-of-the-smallest-subnormal-for-class-numpy-float32-typ
+import eccodes as ecc
 
 
 logger = logging.getLogger(__name__)
