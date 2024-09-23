@@ -3,8 +3,9 @@
 import functools
 import inspect
 import pandas as pd
-from common import longitude, utils, interpolation
-from gribmanager import grib_keys as gk, grib_manager as gm
+
+from . import utils
+from . import grib_keys as gk, grib_manager as gm
 
 
 class Parameter:
@@ -19,9 +20,6 @@ class HorizontalParameter(Parameter):
 
     def get_value_at(self, lat, lon, pressure=None):
         return self._parameter.get_value_at(lat, lon)
-
-    def another_get_value_at(self, lat, lon, pressure=None):
-        return self.get_value_at(lat, lon)
 
     def __repr__(self):
         dump = [super().__repr__()]
@@ -51,46 +49,12 @@ class VerticalParameter(Parameter):
         if len(i_list) == 1:
             return next(v_list)
         else:
-            return interpolation.linear_interpolation(pressure, zip(p_list, v_list))
-
-    def get_value_at2(self, lat, lon, pressure):
-        # TODO: deprecated (remove)
-        root_node = interpolation.InterpolationNode(label=None)
-        for i, p in zip(*self._index_and_pressure_of_sandwiching_levels(pressure, lat, lon)):
-            value_at_level = self._parameter_at_all_levels[i].get_value_at(lat, lon)
-            interpolation.InterpolationNode(label=p, value=value_at_level, parent=root_node)
-        return root_node.interpolate((pressure, ))
+            return utils.linear_interpolation(pressure, zip(p_list, v_list))
 
     def get_vertical_profile_at(self, lat, lon):
         pressures = list(self._pressure_of_all_levels(lat, lon))
         return pd.Series(data=[self._parameter_at_all_levels[i].get_value_at(lat, lon) for i in range(len(pressures))],
                          index=pressures)
-
-    def another_get_value_at(self, lat, lon, pressure):
-        """ TODO: deprecated (remove)
-
-        :param pressure: pressure in [Pa]
-        :param lat: lattitude from the grid
-        :param lon: longitute from the grid
-        :return: value of the parameter at the given 3d-location
-        """
-        parameter_at_any_level = self._parameter_at_all_levels[0]
-        points = parameter_at_any_level.get_four_nearest_points(lat, lon)
-        root_node = interpolation.InterpolationNode(label=None)
-        # FIXME: remove code duplication with grib_manager.GribMessage.get_value_at
-        for same_latitude_points in points:
-            lat_node = interpolation.InterpolationNode(label=same_latitude_points[0].lat, parent=root_node)
-            for point in same_latitude_points:
-                lon_node = interpolation.InterpolationNode(label=longitude.Longitude(point.lon), parent=lat_node)
-                for i, p in zip(*self._index_and_pressure_of_sandwiching_levels(pressure, point.lat, point.lon)):
-                # FIXME: it was like this: for i, p in self.index_and_pressure_of_sandwiching_levels(pressure, lat, lon):
-                    #value_at_level2 = self._parameter_at_all_levels[i].get_value_at(point.lat, point.lon)
-                    value_at_level = self._parameter_at_all_levels[i].get_value_by_index(point.index)
-                    #if value_at_level != value_at_level2:
-                    #    raise Exception(f'value_at_level={value_at_level} does not match value_at_level2={value_at_level2}')
-                    interpolation.InterpolationNode(label=p, value=value_at_level, parent=lon_node)
-
-        return root_node.interpolate((lat, longitude.Longitude(lon), pressure))
 
     def __repr__(self):
         dump = [super().__repr__()]
@@ -128,8 +92,11 @@ class VerticalParameterInModelLevel(VerticalParameter):
 
     def _index_and_pressure_of_sandwiching_levels(self, pressure, lat, lon):
         surface_pressure = self._surface_pressure.get_value_at(lat, lon)
-        return utils.sandwiching_values_by_binary_search(pressure, 0, self._no_levels - 1,
-                                                         functools.partial(self._get_pressure_of_model_level, surface_pressure), aux=(lat, lon))
+        return utils.sandwiching_values_by_binary_search(
+            pressure, 0, self._no_levels - 1,
+            functools.partial(self._get_pressure_of_model_level, surface_pressure),
+            aux=(lat, lon)
+        )
 
     def _get_model_level_definitions(self):
         level_definition_coefficients = self._parameter_at_all_levels[0][gk.PV]
@@ -157,8 +124,11 @@ class VerticalParameterInPressureLevel(VerticalParameter):
         return self._pressure_by_level
 
     def _index_and_pressure_of_sandwiching_levels(self, pressure, lat, lon):
-        return utils.sandwiching_values_by_binary_search(pressure, 0, self._no_levels - 1,
-                                                         lambda index: self._pressure_by_level[index], aux=(lat, lon))
+        return utils.sandwiching_values_by_binary_search(
+            pressure, 0, self._no_levels - 1,
+            lambda index: self._pressure_by_level[index],
+            aux=(lat, lon)
+        )
 
     def __repr__(self):
         dump = [super().__repr__()]

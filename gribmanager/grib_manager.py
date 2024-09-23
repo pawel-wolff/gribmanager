@@ -1,14 +1,13 @@
-# TODO: look into pygrid library: https://github.com/jswhit/pygrib/blob/master/pygrib.pyx; https://jswhit.github.io/pygrib/docs/pygrib-module.html
-
+import logging
 import functools
-import math
-import eccodes as ecc
 import numpy as np
-import xarray as xr
-from common.log import logger
-from common import utils, abstract_dictionary, longitude, interpolation
-from gribmanager import grib_keys as gk
+import eccodes as ecc
 
+from . import utils
+from . import grib_keys as gk
+
+
+logger = logging.getLogger(__name__)
 
 # for debug purposes only; can be removed in the future
 _grib_items = 0
@@ -45,13 +44,13 @@ class GribAbstractItem:
 
 
 # basic implementation of access to a GRIB message
-class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
+class GribMessage(utils.AbstractDictionary, GribAbstractItem):
     def __init__(self, message_id, grib_file, headers_only=False):
         super().__init__()
         global _grib_messages
         _grib_messages += 1
         self._id = message_id
-        logger().debug(f'initialized GribMessage id={self.get_id()}')
+        logger.debug(f'initialized GribMessage id={self.get_id()}')
         # keep a reference to a grib file in order not to dispose the file before disposing the grib message
         self._grib_file = grib_file
         self._values = None
@@ -192,7 +191,7 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
             _id = self.get_id()
             ecc.codes_release(_id)
             self._id = None
-            logger().debug(f'released GribMessage id={_id}')
+            logger.debug(f'released GribMessage id={_id}')
             global _grib_messages_released
             _grib_messages_released += 1
 
@@ -208,7 +207,7 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
         if key not in self:
             raise KeyError(f'GRIB message does not contain key={key}: {str(self)}')
         if ecc.codes_is_missing(self.get_id(), key):
-            logger().warning(f'key={key} is has value=MISSING in the GRIB message: {str(self)}')
+            logger.warning(f'key={key} is has value=MISSING in the GRIB message: {str(self)}')
         if ecc.codes_get_size(self.get_id(), key) > 1:
             return ecc.codes_get_array(self.get_id(), key)
         else:
@@ -218,7 +217,6 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
         if not use_eccodes_routine and self._get_lat_lon_index_of_four_nearest_points is not None:
             points = self._get_lat_lon_index_of_four_nearest_points(lat, lon)
             if check_assertion:
-                # TODO: remove the assertion
                 indices_eccodes = {point.index for point in self.get_four_nearest_points(lat, lon, use_eccodes_routine=True)}
                 indices = {point.index for point in points}
                 assert indices == indices_eccodes, (lat, lon, indices, indices_eccodes)
@@ -233,35 +231,12 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
         # |   |
         # c - d
         p = abs(lat - a.lat) / abs(c.lat - a.lat)
-        v_ac = interpolation.midpoint(self.get_value_by_index(a.index), self.get_value_by_index(c.index), p)
-        v_bd = interpolation.midpoint(self.get_value_by_index(b.index), self.get_value_by_index(d.index), p)
-        return interpolation.linear_interpolation(longitude.Longitude(lon),
-                                                  ((longitude.Longitude(a.lon), v_ac),
-                                                   (longitude.Longitude(b.lon), v_bd)))
-
-    def get_value_at_1(self, lat, lon):
-        # TODO: deprecated (remove)
-        (a, b), (c, d) = self.get_four_nearest_points(lat, lon)
-        # a - b
-        # |   |
-        # c - d
-        p = abs(lat - a.lat) / abs(c.lat - a.lat)
-        v_ac = interpolation.midpoint(self.get_value_by_index(a.index), self.get_value_by_index(c.index), p)
-        v_bd = interpolation.midpoint(self.get_value_by_index(b.index), self.get_value_by_index(d.index), p)
-        dist_lon_a = abs(longitude.Longitude(lon) - longitude.Longitude(a.lon))
-        dist_b_lon = abs(longitude.Longitude(b.lon) - longitude.Longitude(lon))
-        q = dist_lon_a / (dist_lon_a + dist_b_lon)
-        return interpolation.midpoint(v_ac, v_bd, q)
-
-    def get_value_at_2(self, lat, lon):
-        # TODO: deprecated (remove)
-        root_node = interpolation.InterpolationNode(label=None)
-        points = self.get_four_nearest_points(lat, lon)
-        for same_latitude_points in points:
-            lat_node = interpolation.InterpolationNode(label=same_latitude_points[0].lat, parent=root_node)
-            for point in same_latitude_points:
-                interpolation.InterpolationNode(label=longitude.Longitude(point.lon), value=self.get_value_by_index(point.index), parent=lat_node)
-        return root_node.interpolate((lat, longitude.Longitude(lon)))
+        v_ac = utils.midpoint(self.get_value_by_index(a.index), self.get_value_by_index(c.index), p)
+        v_bd = utils.midpoint(self.get_value_by_index(b.index), self.get_value_by_index(d.index), p)
+        return utils.linear_interpolation(
+            utils.Longitude(lon),
+            ((utils.Longitude(a.lon), v_ac), (utils.Longitude(b.lon), v_bd))
+        )
 
     def get_value_by_index(self, index):
         if self._values is None:
@@ -313,7 +288,7 @@ class GribMessage(abstract_dictionary.AbstractDictionary, GribAbstractItem):
 
 
 # lazy dictionary-like implementation of access to a GRIB message
-class GribMessageWithCache(abstract_dictionary.AbstractCacheDictionary, GribMessage):
+class GribMessageWithCache(utils.AbstractCacheDictionary, GribMessage):
     pass
 
 
@@ -322,7 +297,7 @@ class _GribMessageKeyIterator(GribAbstractItem):
         super().__init__()
         self._grib_message = grib_message
         self._id = ecc.codes_keys_iterator_new(self._grib_message.get_id(), key_namespace)
-        logger().debug(f'_GribMessageKeyIterator init id={self.get_id()}')
+        logger.debug(f'_GribMessageKeyIterator init id={self.get_id()}')
         ecc.codes_skip_duplicates(self.get_id())
         #ecc.codes_skip_computed(self.get_id())
         #ecc.codes_skip_edition_specific(self.get_id())
@@ -338,7 +313,7 @@ class _GribMessageKeyIterator(GribAbstractItem):
             _id = self.get_id()
             ecc.codes_keys_iterator_delete(_id)
             self._id = None
-            logger().debug(f'released _GribMessageKeyIterator id={_id}')
+            logger.debug(f'released _GribMessageKeyIterator id={_id}')
 
     def __del__(self):
         self.close()
@@ -374,7 +349,7 @@ class GribFile(GribAbstractItem):
         self._cache = cache
         self._filename = str(filename)
         self._file = open(filename, 'rb')
-        logger().debug(f'opened GribFile {str(self)}')
+        logger.debug(f'opened GribFile {str(self)}')
         global _grib_files
         _grib_files += 1
 
@@ -386,7 +361,7 @@ class GribFile(GribAbstractItem):
     def close(self):
         if self._file is not None and not self._file.closed:
             self.get_file().close()
-            logger().debug(f'closed GribFile {str(self)}')
+            logger.debug(f'closed GribFile {str(self)}')
             global _grib_files_closed
             _grib_files_closed += 1
 
@@ -416,7 +391,7 @@ class GribFile(GribAbstractItem):
         return '\n'.join(dump)
 
 
-class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem):
+class GribFileIndexedBy(utils.AbstractDictionary, GribAbstractItem):
     def __init__(self, filename, *keys, cache=False):
         super().__init__()
         if len(keys) == 0:
@@ -425,7 +400,7 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
         self._cache = cache
         self._filename = str(filename)
         self._id = ecc.codes_index_new_from_file(self._filename, self._keys)
-        logger().debug(f'initialized GribFileIndexedBy id={self.get_id()}, filename={self._filename}')
+        logger.debug(f'initialized GribFileIndexedBy id={self.get_id()}, filename={self._filename}')
         global _grib_indices
         _grib_indices += 1
 
@@ -439,7 +414,7 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
             _id = self.get_id()
             ecc.codes_index_release(_id)
             self._id = None
-            logger().debug(f'released GribFileIndexedBy id={_id}, filename={self._filename}')
+            logger.debug(f'released GribFileIndexedBy id={_id}, filename={self._filename}')
             global _grib_indices_released
             _grib_indices_released += 1
 
@@ -447,7 +422,7 @@ class GribFileIndexedBy(abstract_dictionary.AbstractDictionary, GribAbstractItem
         self.close()
 
     def __getitem__(self, index):
-        index = utils.to_tuple(index)
+        index = utils.ensure_tuple(index)
         if len(index) != len(self._keys):
             raise KeyError(f'expected number of indices is {len(self._keys)}')
         for key, index in zip(self._keys, index):

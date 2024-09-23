@@ -1,4 +1,4 @@
-from gribmanager.grib_keys import (
+from .grib_keys import (
     TYPE_OF_LEVEL,
     PV,
     PARAMETER_ID,
@@ -21,11 +21,11 @@ from gribmanager.grib_keys import (
     NO_LONGITUDES,
 )
 
-from gribmanager.grib_manager import (
+from .grib_manager import (
     open_grib,
 )
 
-from gribmanager.parameter_manager_vectorized import (
+from .parameter_manager_vectorized import (
     MODEL_LEVEL_DIM,
     PRESSURE_LEVEL_DIM,
     LAT_DIM,

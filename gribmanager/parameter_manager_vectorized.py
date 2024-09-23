@@ -2,16 +2,18 @@
 
 import abc
 import functools
-import inspect
+import logging
 import numpy as np
 import pandas as pd
 import xarray as xr
 import scipy.interpolate
 from typing import Iterable, List, Optional
-from common.log import logger
-from common import utils
-from common.longitude import normalize_longitude
-from gribmanager import grib_keys as gk, grib_manager as gm
+
+from . import utils
+from . import grib_keys as gk, grib_manager as gm
+
+
+logger = logging.getLogger(__name__)
 
 
 MODEL_LEVEL_DIM = 'ml'
@@ -32,7 +34,7 @@ def clip_latitude(arr):
 
     count = np.count_nonzero(arr < -90.) + np.count_nonzero(arr > 90.)
     if count > 0:
-        logger().warning(f'{count} latitude(s) outside the interval [-90, 90] found: {arr[(arr < -90.) | (arr > 90.)]}; these values were clipped to [-90, 90]')
+        logger.warning(f'{count} latitude(s) outside the interval [-90, 90] found: {arr[(arr < -90.) | (arr > 90.)]}; these values were clipped to [-90, 90]')
         return np.clip(arr, -90., 90.)
     else:
         return arr
@@ -45,9 +47,9 @@ def clip_and_log(a_min, a_max, arr):
         below_min = arr_np[arr_np < a_min]
         above_max = arr_np[arr_np > a_max]
         if below_min.size > 0:
-            logger().warning(f'{below_min.size} pressure value(s) below min={a_min}: {pd.Series(below_min.flat).describe()}]')
+            logger.warning(f'{below_min.size} pressure value(s) below min={a_min}: {pd.Series(below_min.flat).describe()}]')
         if above_max.size > 0:
-            logger().warning(f'{above_max.size} pressure value(s) above max={a_max}: {pd.Series(above_max.flat).describe()}]')
+            logger.warning(f'{above_max.size} pressure value(s) above max={a_max}: {pd.Series(above_max.flat).describe()}]')
         if a_min == -np.inf:
             a_min = None
         if a_max == np.inf:
@@ -66,7 +68,7 @@ def _force_unique_grib_message_per_level(grib_msgs):
             duplicates += 1
         msg_by_level[level] = msg
     if duplicates > 0:
-        logger().warning(f'found {duplicates} of GRIB messages while forcing unique message per level; no_levels={len(msg_by_level)}; last processed GRIB message={msg}')
+        logger.warning(f'found {duplicates} of GRIB messages while forcing unique message per level; no_levels={len(msg_by_level)}; last processed GRIB message={msg}')
     return list(msg_by_level.values())
 
 
@@ -133,7 +135,7 @@ class HorizontalParameter(Parameter):
         if lat is not None:
             coords[LAT_DIM] = clip_latitude(lat)
         if lon is not None:
-            coords[LON_DIM] = normalize_longitude(lon, self.smallest_lon_coord)
+            coords[LON_DIM] = utils.normalize_longitude(lon, self.smallest_lon_coord)
         return self.data.interp(coords=coords, method='linear', assume_sorted=True)
 
     def interp_numpy(self, lat, lon, pressure=None):
@@ -154,7 +156,7 @@ class HorizontalParameter(Parameter):
             raise ValueError(f'lat and lon must have the same shape; lat.shape={lat.shape}, lon.shape={lon.shape}')
 
         points = (self.lat_coords, self.lon_coords)
-        xi = np.stack([clip_latitude(lat), normalize_longitude(lon, self.smallest_lon_coord)], axis=-1)
+        xi = np.stack([clip_latitude(lat), utils.normalize_longitude(lon, self.smallest_lon_coord)], axis=-1)
         res = scipy.interpolate.interpn(points, self.data.values, xi, method='linear')
         return res if lat.shape != () else res.squeeze()
 
@@ -274,7 +276,7 @@ class VerticalParameterInModelLevel(VerticalParameter):
         if lat is not None:
             coords[LAT_DIM] = clip_latitude(lat)
         if lon is not None:
-            coords[LON_DIM] = normalize_longitude(lon, self.smallest_lon_coord)
+            coords[LON_DIM] = utils.normalize_longitude(lon, self.smallest_lon_coord)
         return self.data.interp(coords=coords, method='linear', assume_sorted=True)
 
     def interp_numpy(self, lat, lon, pressure):
@@ -313,7 +315,7 @@ class VerticalParameterInModelLevel(VerticalParameter):
         ml = (1 - weight) * self.ml_coords[lower_level_index] + weight * self.ml_coords[upper_level_index]
 
         points = (self.ml_coords, self.lat_coords, self.lon_coords)
-        xi = np.stack([ml, clip_latitude(lat), normalize_longitude(lon, self.smallest_lon_coord)], axis=-1)
+        xi = np.stack([ml, clip_latitude(lat), utils.normalize_longitude(lon, self.smallest_lon_coord)], axis=-1)
         return scipy.interpolate.interpn(points, self.data.values, xi, method='linear')
 
 
@@ -345,7 +347,7 @@ class VerticalParameterInPressureLevel(VerticalParameter):
         if lat is not None:
             coords[LAT_DIM] = clip_latitude(lat)
         if lon is not None:
-            coords[LON_DIM] = normalize_longitude(lon, self.smallest_lon_coord)
+            coords[LON_DIM] = utils.normalize_longitude(lon, self.smallest_lon_coord)
         return self.data.interp(coords=coords, method='linear', assume_sorted=True)
 
     def interp_numpy(self, lat, lon, pressure):
@@ -366,7 +368,7 @@ class VerticalParameterInPressureLevel(VerticalParameter):
             raise ValueError(f'lat, lon and pressure must have the same shape; lat.shape={lat.shape}, lon.shape={lon.shape}, pressure.shape={pressure.shape}')
 
         points = (self.pl_coords, self.lat_coords, self.lon_coords)
-        xi = np.stack([self.clip_pressures(pressure), clip_latitude(lat), normalize_longitude(lon, self.smallest_lon_coord)], axis=-1)
+        xi = np.stack([self.clip_pressures(pressure), clip_latitude(lat), utils.normalize_longitude(lon, self.smallest_lon_coord)], axis=-1)
         return scipy.interpolate.interpn(points, self.data.values, xi, method='linear')
 
 
@@ -435,7 +437,7 @@ def load_grib_parameters(filenames, params_spec, ignore_not_found=False, surface
         else:
             surface_pressure_spec = \
                 [param_spec for param_spec in params_spec if param_spec['name'] == SURFACE_PRESSURE_SHORTNAME]
-            logger().warning(f'a surface pressure read from the GRIB file(s)={filenames} '
+            logger.warning(f'a surface pressure read from the GRIB file(s)={filenames} '
                              f'using param_spec={surface_pressure_spec} is not a HorizontalParameter; '
                              f'it is: {surface_pressure}')
 
@@ -445,7 +447,7 @@ def load_grib_parameters(filenames, params_spec, ignore_not_found=False, surface
 def _load_grib_parameters_from_single_file(filename, params_spec):
     def get_param_from_msgs(msgs, param_spec):
         if param_spec['must_be_unique'] and len(msgs) > 1:
-            logger().warning(
+            logger.warning(
                 f'{len(msgs)} GRIB messages were found in the GRIB file {filename} with param_spec={param_spec} '
                 f'while only one was expected; taking the last GRIB message')
             msgs = msgs[-1:]
@@ -472,8 +474,10 @@ def _load_grib_parameters_from_single_file(filename, params_spec):
         msgs_by_param_name = {}
         spec_priority_by_param_name = {}
         group_of_priority_and_param_spec_by_param_id = \
-            utils.groupby(enumerate(params_spec),
-                          lambda priority_and_param_spec: priority_and_param_spec[1]['param_id'])
+            utils.groupby(
+                enumerate(params_spec),
+                lambda priority_and_param_spec: priority_and_param_spec[1]['param_id']
+            )
 
         with gm.open_grib(filename) as grib:
             for msg in grib:
@@ -482,7 +486,7 @@ def _load_grib_parameters_from_single_file(filename, params_spec):
                     try:
                         param_id = msg[gk.PARAMETER_ID]
                     except KeyError:
-                        logger().warning(
+                        logger.warning(
                             f'grib message {msg} in the GRIB file {filename} does not have the GRIB key={gk.PARAMETER_ID}; '
                             f'the message is ignored'
                         )
@@ -501,7 +505,7 @@ def _load_grib_parameters_from_single_file(filename, params_spec):
                             try:
                                 v = msg[key]
                             except KeyError:
-                                logger().warning(
+                                logger.warning(
                                     f'grib message {msg} in the GRIB file {filename} does not have the GRIB key={key} '
                                     f'on which it was supposed to be filtered; value={value}; the message is ignored')
                                 cond = False
@@ -539,7 +543,7 @@ def _load_grib_parameters_from_single_file(filename, params_spec):
             try:
                 param = get_param_from_msgs(msgs, param_spec)
             except Exception as e:
-                logger().exception(f'LOAD_GRIB_PAREMETERS_ERROR: cannot load ECMWF parameter from the GRIB file={filename} '
+                logger.exception(f'LOAD_GRIB_PAREMETERS_ERROR: cannot load ECMWF parameter from the GRIB file={filename} '
                                    f'with param_spec={param_spec}', exc_info=e)
                 continue
             if param is not None:
@@ -556,7 +560,7 @@ def _load_grib_parameters_from_single_file_using_index(filename, params_spec, su
         nonlocal surface_pressure
         grib_msgs = grib.get(param_id, default=[])
         try:
-            logger().debug(f'param_id={param_id}, len(grib_msgs)={len(grib_msgs)}, filter_on={filter_on}')
+            logger.debug(f'param_id={param_id}, len(grib_msgs)={len(grib_msgs)}, filter_on={filter_on}')
             if filter_on:
                 filtered_grib_msgs = []
                 for msg in grib_msgs:
@@ -565,7 +569,7 @@ def _load_grib_parameters_from_single_file_using_index(filename, params_spec, su
                         try:
                             v = msg[key]
                         except KeyError:
-                            logger().warning(f'grib message {msg} in the GRIB file {filename} does not have the GRIB key={key} on which it was supposed to be filtered; value={value}')
+                            logger.warning(f'grib message {msg} in the GRIB file {filename} does not have the GRIB key={key} on which it was supposed to be filtered; value={value}')
                             cond = False
                             break
                         if isinstance(value, (list, tuple)):
@@ -581,7 +585,7 @@ def _load_grib_parameters_from_single_file_using_index(filename, params_spec, su
                 return None
 
             if must_be_unique and len(filtered_grib_msgs) > 1:
-                logger().warning(f'more than one grib message found in the GRIB file {filename} with param_id={param_id} and filter_on={filter_on}, '
+                logger.warning(f'more than one grib message found in the GRIB file {filename} with param_id={param_id} and filter_on={filter_on}, '
                                f'while only one was expected; taking the last grib message; number of filtered messages={len(filtered_grib_msgs)}')
                 filtered_grib_msgs = filtered_grib_msgs[-1:]
 
@@ -614,7 +618,7 @@ def _load_grib_parameters_from_single_file_using_index(filename, params_spec, su
             try:
                 param = get_param_by_id(param_id, must_be_unique, filter_on)
             except Exception as e:
-                logger().exception(f'LOAD_GRIB_PAREMETERS_ERROR: cannot load ECMWF parameter from the GRIB file={filename} with name={name}, '
+                logger.exception(f'LOAD_GRIB_PAREMETERS_ERROR: cannot load ECMWF parameter from the GRIB file={filename} with name={name}, '
                                  f'param_id={param_id}, must_be_unique={must_be_unique}, filter_on={filter_on}', exc_info=e)
                 continue
             if param is not None:
