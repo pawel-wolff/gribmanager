@@ -1,6 +1,6 @@
 # grib-manager
 
-A Python, object-oriented wrapper around (a part) of ECMWF's ecCodes library.
+An object-oriented Python wrapper around (a part) of ECMWF's ecCodes library.
 
 
 ## Description
@@ -13,8 +13,8 @@ TODO
 ### Clone the git repository
 
 ```sh
-git clone https://github.com/iagos-dc/grib-manager.git
-cd grib-manager
+git clone https://github.com/pawel-wolff/grib_manager.git
+cd grib_manager
 ```
 
 ### Install the package
@@ -29,7 +29,7 @@ python -m pip install .
 python -m pip install --editable .
 ```
 
-### Test your installation
+### Test your installation (requires a sample GRIB file)
 
 ```sh
 python tests/test_grib_manager.py

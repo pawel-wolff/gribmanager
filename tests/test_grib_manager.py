@@ -4,12 +4,10 @@ import itertools
 import gribmanager as gm
 
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s', level=logging.DEBUG)
-
-
 INPUT = '/home/wolp/data/ECMWF/EN19090900'
-#INPUT_1994 = '/home/wolp/data/MCMWF-ENFILES/EN94070100'
-#INPUT = '/home/wolp/data/MCMWF-ENFILES/EN16070200.bis'
+
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 if __name__ == '__main__':
@@ -22,4 +20,4 @@ if __name__ == '__main__':
             msg = idx[p, l]
         except KeyError:
             continue
-        print(f'{p}, {l}: {len(msg)}')
+        logger.info(f'paramId={p},\ttypeOfLevel={l},\tn_messages={len(msg)}')
