@@ -17,19 +17,14 @@ TODO (refer to notebooks which show typical use cases: TBD)
 > It is highly recommended to use a **virtual environment** for the installation
 (`conda`, `venv`, etc.) instead of a *system-wide environment*.
 
+First configure an [ssh key to your gitlab account](https://docs.gitlab.com/ee/user/ssh.html#add-an-ssh-key-to-your-gitlab-account).
 
 ### Install the package directly from a git repository 
 
-If you have [configured ssh keys to your gitlab account](https://docs.gitlab.com/ee/user/ssh.html#add-an-ssh-key-to-your-gitlab-account),
-use
 ```sh
 python -m pip install git+ssh://git@gitlab.in2p3.fr/sedoo/iagos/pva/core/gribmanager.git
 ```
-Otherwise, use
-```sh
-python -m pip install git+https://gitlab.in2p3.fr/sedoo/iagos/pva/core/gribmanager.git
-```
-For updating the package from git, use `--force-reinstall --no-deps` options, e.g.
+For updating the package from git, use `--force-reinstall --no-deps` options:
 ```sh
 python -m pip install --force-reinstall --no-deps git+ssh://git@gitlab.in2p3.fr/sedoo/iagos/pva/core/gribmanager.git
 ```
@@ -37,13 +32,9 @@ python -m pip install --force-reinstall --no-deps git+ssh://git@gitlab.in2p3.fr/
 
 ### Install the package in the development mode
 
-First, clone this git repository doing
+First, clone this git repository:
 ```sh
 git clone git@gitlab.in2p3.fr:sedoo/iagos/pva/core/gribmanager.git 
-```
-or
-```sh
-git clone https://gitlab.in2p3.fr/sedoo/iagos/pva/core/gribmanager.git
 ```
 Next, install the package from the local repository in the *editable mode*:
 ```sh
